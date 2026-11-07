@@ -27,7 +27,7 @@ The MVP supports JPEG/PNG images (≤20 MB, ≤25 megapixels) and MP4 videos (�
 
 ### System architecture
 
-![System architecture](https://raw.githubusercontent.com/YOUR-ORG/YOUR-REPO/main/docs/architecture.png)
+![System architecture](https://raw.githubusercontent.com/NatMartini/fastzip1779/bbb3b9597802e516710c81839373faf5c055faeb/proposal/architecture.png)
 
 **Frontend and API:** Caddy terminates HTTPS, serves the built React frontend, and routes `/api/*` to FastAPI, so both share one origin and cookies stay first-party. FastAPI handles registration, login, and upload validation, stores the original in Spaces, creates a `QUEUED` job, and returns `202 Accepted`; the frontend then polls job status. Sessions live in PostgreSQL rather than process memory, so any API replica can serve any request without sticky sessions.
 

@@ -27,7 +27,7 @@
 
 ### 系统架构
 
-![System architecture](https://raw.githubusercontent.com/YOUR-ORG/YOUR-REPO/main/docs/architecture.png)
+![System architecture](https://raw.githubusercontent.com/NatMartini/fastzip1779/bbb3b9597802e516710c81839373faf5c055faeb/proposal/architecture.png)
 
 **前端与 API：** Caddy 负责终止 HTTPS 连接、提供构建好的 React 前端静态资源，并将 `/api/*` 路由至 FastAPI，从而使前后端共享同一源（Origin）并保持第一方 Cookie。FastAPI 处理注册、登录和上传验证，将原始文件存储到 Spaces，创建状态为 `QUEUED` 的任务并返回 `202 Accepted`；随后前端轮询任务状态。会话存储在 PostgreSQL 而非进程内存中，因此任何 API 副本都可以处理任意请求，无需粘性会话（Sticky Sessions）。
 
