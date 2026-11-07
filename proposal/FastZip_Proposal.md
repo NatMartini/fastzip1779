@@ -1,4 +1,4 @@
-# Cloud Media Compressor - Project Proposal
+# FastZip - Project Proposal
 
 **Course:** ECE1779 - Introduction to Cloud Computing  
 **Team members:** Yuxin Duan, Kevin Li, Xi Chen, Ouyi Yang
@@ -9,7 +9,7 @@ Photos and videos are central to communication and coursework, but large files a
 
 Desktop tools such as HandBrake require installation and encoding knowledge. Online compressors often cap file sizes, give little visibility into long-running jobs, and are vague about how long files are kept. Browser-side encoding avoids uploads but is slow and battery-intensive on low-end devices.
 
-**Cloud Media Compressor** offloads compression to cloud workers. Users register with an email address, upload a file, choose a preset, and download the result from any device; media is deleted automatically after 24 hours. The project also exercises core cloud challenges: distributed job coordination, state that survives container failures, secure handling of private files, and operational visibility.
+**FastZip** offloads image and video compression to cloud workers. Users register with an email address, upload a file, choose a preset, and download the result from any device; media is deleted automatically after 24 hours. The project also exercises core cloud challenges: distributed job coordination, state that survives container failures, secure handling of private files, and operational visibility.
 
 ## 2. Objectives, Architecture, and Key Features
 
