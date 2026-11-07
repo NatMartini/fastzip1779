@@ -35,14 +35,14 @@
 
 **媒体存储：** 私有的 DigitalOcean Spaces 负责保存原始文件和输出文件，使两个节点上的工作节点无需共享文件系统即可通过 S3 API 共享文件，代价是会产生网络传输耗时。文件下载采用在验证所有权后签发的 5 分钟预签名 URL（Presigned URL），以链接可短暂分享为代价避免大文件传输占用 API 带宽；同时由清理服务定期删除过期和孤立的对象。
 
-**管理员门户：** 管理员账户仅能通过 Swarm 管理节点上的服务端 CLI 创建，绝不通过 Web 应用开放，且管理员只能查看任务元数据而无法访问用户的媒体文件。管理仪表盘展示队列深度、各状态任务数、吞吐量、失败率、工作节点心跳、最近一次备份结果，以及来自 DigitalOcean Monitoring API 的 Droplet CPU 和内存使用率。错误日志列出由各服务写入 PostgreSQL 的结构化事件（包含服务、节点、任务和消息），并支持按时间和所属服务进行筛选。
+**管理员门户：** 管理员账户仅能通过 Swarm 管理节点上的服务端 CLI 创建，绝不通过 Web 应用开放，且管理员只能查看任务元数据而无法访问用户的媒体文件。管理仪表盘展示队列深度、各状态任务数、吞吐量、失败率、工作节点心跳、最近一次备份结果，以及来自 DigitalOcean Monitoring API 的 Droplet CPU 和内存使用率。错误日志列出由各服务写入 PostgreSQL 的结构化事件（包含服务、节点、任务和消息）。
 
 ### 课程核心技术
 
 - **Docker 与 Docker Compose：** 前端、API、工作节点和备份服务各自拥有独立的 Dockerfile。Compose 可在本地配合 PostgreSQL 和 MinIO（兼容 S3 的 Spaces 替代方案）运行这些服务，无需云端凭证即可跑通完整工作流。
 - **PostgreSQL 与持久化存储：** PostgreSQL 作为单副本 Swarm 服务运行，通过节点标签固定在挂载了 10 GB DigitalOcean Volume 的 Droplet 上，确保数据在容器重启和重新部署后依然保留。我们刻意不采用托管版 PostgreSQL，因为那无法演示持久化存储机制。使用 Alembic 管理数据库迁移。
 - **DigitalOcean 部署与 Swarm 编排：** 我们选择 DigitalOcean 而非 Fly.io，因为 Swarm 需要我们能完全控制的 Docker 主机，而且 DigitalOcean 同时提供 Volume、Spaces 和告警。Droplet A（Swarm 管理节点）运行 Caddy、PostgreSQL、备份与清理调度器以及一个 API 副本；Droplet B 运行第二个 API 副本。工作节点在带有 CPU 限制的情况下分布在两个节点上，PostgreSQL 则配有资源预留以防编码任务耗尽其资源。Swarm 提供跨主机 Overlay 网络、跨 API 副本的 VIP 负载均衡、健康检查与滚动更新。由于两个管理节点在 Raft 仲裁机制下无法容忍管理节点故障，我们仅运行单个管理节点；失去 Droplet A 会导致数据库和控制平面停止，我们接受这一风险并通过备份加以缓解。
-- **监控与可观测性：** 两台 Droplet 均运行 DigitalOcean 指标代理，并配置告警策略，在 CPU 或内存持续超过 80% 或磁盘使用率超过 75% 时向团队发送邮件。日志和管理仪表盘涵盖应用健康状态。我们将对比 1、2 和 4 个工作节点下的吞吐量表现。
+- **监控与可观测性：** 两台 Droplet 均运行 DigitalOcean 指标代理，并配置告警策略，在 CPU 或内存持续超过 80% 或磁盘使用率超过 75% 时向团队发送邮件。我们将对比 1、2 和 4 个工作节点下的吞吐量表现。
 
 ### 高级特性 1：安全增强（Security Enhancements）
 
