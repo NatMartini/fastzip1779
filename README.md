@@ -60,7 +60,7 @@ On every pull request, **GitHub Actions** runs linting, unit tests, and API test
 
 A single-replica backup service runs `pg_dump` hourly, encrypts each dump with an `age` public key, and uploads it to a separate private Spaces bucket, keeping 24 hourly and 7 daily copies. The private key stays offline, so a compromised server cannot read backups. Each run's result appears on the admin dashboard, and failures in the error log. The Volume survives container replacement, while backups cover corruption, accidental deletion, and droplet loss. Because media expires after 24 hours, a restore reconciles job records with objects still in Spaces and marks jobs with missing files `EXPIRED`.
 
-**Verification:** Restore into a fresh database, compare records, and measure backup size, restore time, and the data-loss window (at most one hour).
+**Verification:** Restore a backup into a fresh database, compare job records, and measure backup size, restore time, and the actual data-loss window. With successful hourly backups, our target recovery point is within one hour.
 
 ### Design tradeoffs and feasibility
 
