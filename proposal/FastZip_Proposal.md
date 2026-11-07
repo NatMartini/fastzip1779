@@ -5,11 +5,11 @@
 
 ## 1. Motivation
 
-Photos and videos are central to communication and coursework, but large files are slow to upload and often exceed size limits: a short 1080p screen recording can be several times larger than Gmail's 25 MB attachment limit, and course platforms and messaging apps impose similar caps. Our target users are students submitting recorded presentations or video assignments, and people who regularly share media under such limits, often from laptops or phones with little processing power.
+Photos and videos are central to communication and coursework, but large files are slow to upload and often exceed size limits: a short 1080p screen recording can be several times larger than Gmail's 25 MB attachment limit, and course platforms and messaging apps impose similar caps. Our target users are students submitting short video assignments or demo clips, and people who regularly share media under such limits, often from laptops or phones with little processing power.
 
 Desktop tools such as HandBrake require installation and encoding knowledge. Online compressors often cap file sizes, give little visibility into long-running jobs, and are vague about how long files are kept. Browser-side encoding avoids uploads but is slow and battery-intensive on low-end devices.
 
-**FastZip** offloads image and video compression to cloud workers. Users register with an email address, upload a file, choose a preset, and download the result from any device; media is deleted automatically after 24 hours. The project also exercises core cloud challenges: distributed job coordination, state that survives container failures, secure handling of private files, and operational visibility.
+**FastZip** offloads image and video compression to cloud workers. Users register with an email address, upload a file, choose a preset, and download the result from any device; media is deleted automatically after 24 hours.
 
 ## 2. Objectives, Architecture, and Key Features
 
@@ -35,14 +35,14 @@ The MVP supports JPEG/PNG images (≤20 MB, ≤25 megapixels) and MP4 videos (�
 
 **Media storage:** Private DigitalOcean Spaces holds originals and outputs, so workers on either node share files through the S3 API without a shared filesystem, at the cost of network transfer time. Downloads use 5-minute presigned URLs issued after an ownership check, keeping large transfers off the API at the cost of links being briefly shareable; a cleanup service deletes expired and orphaned objects.
 
-**Administrator portal:** Admin accounts are created only by a server-side CLI on the Swarm manager, never through the web app, and admins see job metadata but not user media. The dashboard shows queue depth, jobs by status, throughput, failure rate, worker heartbeats, the last backup result, and droplet CPU/memory from the DigitalOcean Monitoring API. The error log lists structured events (service, node, job, message) that the API, workers, and backup service write to PostgreSQL, filterable by time and service.
+**Administrator portal:** Admin accounts are created only by a server-side CLI on the Swarm manager, never through the web app, and admins see job metadata but not user media. The dashboard shows queue depth, jobs by status, throughput, failure rate, worker heartbeats, the last backup result, and droplet CPU/memory from the DigitalOcean Monitoring API. The error log lists structured events (service, node, job, message) that all services write to PostgreSQL, filterable by time and service.
 
 ### Course technologies
 
 - **Docker and Docker Compose:** The frontend, API, worker, and backup service each have a Dockerfile. Compose runs them locally with PostgreSQL and MinIO (an S3-compatible stand-in for Spaces), so the full workflow runs without cloud credentials.
 - **PostgreSQL and persistent storage:** PostgreSQL is a single-replica Swarm service pinned by node label to the droplet with an attached 10 GB DigitalOcean Volume, so data survives container restarts and redeployments. We avoid managed PostgreSQL because it would not demonstrate persistent storage. Alembic manages migrations.
-- **Orchestration:** Droplet A (Swarm manager) runs Caddy, PostgreSQL, the backup and cleanup schedulers, and one API replica; Droplet B runs a second API replica. Workers spread across both nodes with CPU limits, and PostgreSQL has a resource reservation so encoding cannot starve it. Swarm provides overlay networking, VIP load balancing across API replicas, health checks, and rolling updates. We run one manager because two managers cannot tolerate a manager failure under Raft quorum; losing Droplet A stops the database and control plane, a risk we accept and mitigate with backups.
-- **Monitoring and observability:** The DigitalOcean metrics agent runs on both droplets, with alert policies that email the team when CPU or memory stays above 80% or Volume disk usage exceeds 75%. Logs and the admin dashboard cover application health. We will compare throughput with one, two, and four workers.
+- **DigitalOcean deployment and Swarm orchestration:** We chose DigitalOcean over Fly.io because Swarm needs Docker hosts we fully control, and DigitalOcean also provides Volumes, Spaces, and alerts. Droplet A (Swarm manager) runs Caddy, PostgreSQL, the backup and cleanup schedulers, and one API replica; Droplet B runs a second API replica. Workers spread across both nodes with CPU limits, and PostgreSQL has a resource reservation so encoding cannot starve it. Swarm provides overlay networking, VIP load balancing across API replicas, health checks, and rolling updates. We run one manager because two managers cannot tolerate a manager failure under Raft quorum; losing Droplet A stops the database and control plane, a risk we accept and mitigate with backups.
+- **Monitoring and observability:** The DigitalOcean metrics agent runs on both droplets, with alert policies that email the team when CPU or memory stays above 80% or disk usage exceeds 75%. Logs and the admin dashboard cover application health. We will compare throughput with one, two, and four workers.
 
 ### Advanced feature 1: Security Enhancements
 
@@ -60,11 +60,11 @@ On every pull request, **GitHub Actions** runs linting, unit tests, and API test
 
 A single-replica backup service runs `pg_dump` hourly, encrypts each dump with an `age` public key, and uploads it to a separate private Spaces bucket, keeping 24 hourly and 7 daily copies. The private key stays offline, so a compromised server cannot read backups. Each run's result appears on the admin dashboard, and failures in the error log. The Volume survives container replacement, while backups cover corruption, accidental deletion, and droplet loss. Because media expires after 24 hours, a restore reconciles job records with objects still in Spaces and marks jobs with missing files `EXPIRED`.
 
-**Verification:** Restore into a fresh database, compare records, and measure backup size, restore time, and the data-loss window (at most one hour).
+**Verification:** Restore a backup into a fresh database, compare job records, and measure backup size, restore time, and the actual data-loss window. With successful hourly backups, our target recovery point is within one hour.
 
 ### Design tradeoffs and feasibility
 
-Swarm has fewer features than Kubernetes but covers the replication, load balancing, rolling updates, and secrets we need with simpler operations. Strict file limits and bounded worker resources keep encoding load predictable on two droplets, at an estimated US$55/month (two 2 vCPU/4 GB droplets, a 10 GB Volume, and Spaces) covered by student credits.
+Swarm has fewer features than Kubernetes but covers the replication, load balancing, rolling updates, and secrets we need with simpler operations. Strict file limits and bounded worker resources keep encoding load predictable on two droplets, at an estimated US$55/month (two 2 vCPU/4 GB droplets, a 10 GB Volume, and Spaces) covered by student credits. The schedule is feasible because course assignments had each of us run PostgreSQL on a Droplet, build Compose stacks, and use persistent volumes, so most new work is Swarm and integration.
 
 ## 3. Project Plan and Team Responsibilities
 
@@ -108,4 +108,4 @@ Team discussion and AI-assisted exploration led us to separate the API from the 
 
 One AI-assisted discussion concerned worker coordination. `FOR UPDATE SKIP LOCKED` prevents duplicate claims, but when we asked what happens if a worker crashes mid-job, we concluded that locking alone would leave the job stuck or let a stale result overwrite a retry. We added leases, bounded retries, and attempt IDs, and will verify them by killing a worker mid-job and confirming the job is reclaimed and completed exactly once.
 
-Our scope also changed. The first draft used anonymous browser sessions, so users lost their history when cookies were cleared and operators could not see failures; we replaced them with email accounts and an admin portal. An AI review of the draft against the rubric noted that we had not planned monitoring alerts or specified service placement on our two droplets; we confirmed both against the handout and added them.
+Our scope also changed. The first draft used anonymous browser sessions, so users lost their history when cookies were cleared and operators could not see failures; we replaced them with email accounts and an admin portal. AI-assisted review then showed that granting admin rights by email was unsafe: without verification, anyone could register an admin's address first. We verified this attack path and now create admins only with a server-side CLI.
