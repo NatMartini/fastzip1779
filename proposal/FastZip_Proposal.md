@@ -1,7 +1,15 @@
 # FastZip - Project Proposal
 
 **Course:** ECE1779 - Introduction to Cloud Computing  
-**Team members:** Yuxin Duan, Kevin Li, Xi Chen, Ouyi Yang
+**Repository:** [github.com/NatMartini/fastzip1779](https://github.com/NatMartini/fastzip1779)
+
+| Team member | Student number | Email |
+|-------------|----------------|-------|
+| Kevin Li | 1008809498 | dongye.li@mail.utoronto.ca |
+| Xi Chen | 1012863634 | xialex.chen@mail.utoronto.ca |
+| Yuxin Duan | 1008873131 | yuxin.duan@mail.utoronto.ca |
+| Ouyi Yang | 1012421407 | ouyi.yang@mail.utoronto.ca |
+
 
 ## 1. Motivation
 
