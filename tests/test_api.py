@@ -84,6 +84,11 @@ def test_original_fallback_and_expiry(client, account, image):
     result = client.get(f"/api/jobs/{identifier}/download").json()
     assert result["is_original"] is True
     with session_factory()() as db, db.begin():
+        db.get(Job, uuid.UUID(identifier)).expires_at = now() + timedelta(seconds=60)
+    near_expiry = client.get(f"/api/jobs/{identifier}/download").json()
+    assert 0 < near_expiry["expires_in"] <= 60
+    assert int(parse_qs(urlparse(near_expiry["url"]).query)["X-Amz-Expires"][0]) <= 60
+    with session_factory()() as db, db.begin():
         db.get(Job, uuid.UUID(identifier)).expires_at = now() - timedelta(seconds=1)
     assert client.get(f"/api/jobs/{identifier}").json()["status"] == "EXPIRED"
     assert client.get(f"/api/jobs/{identifier}/download?kind=original").status_code == 410

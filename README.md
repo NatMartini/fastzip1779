@@ -3,11 +3,11 @@
 Private image and video compression with a React frontend, FastAPI API, PostgreSQL-backed job queue, and independently scalable workers.
 
 **Course:** ECE1779 · **Team:** Yuxin Duan, Kevin Li, Xi Chen, Ouyi Yang
-The original design and team responsibilities remain in [the project proposal](proposal/FastZip_Proposal.md). This branch implements the complete application. The local destination happens to be named ECE779; the course name follows the proposal.
+The original design and team responsibilities remain in [the project proposal](proposal/FastZip_Proposal.md). This branch implements the complete application.
 
 ## Run locally
 
-Install Docker Engine / Docker Desktop with Docker Compose v2. No cloud account is required.
+Install Docker Engine / Docker Desktop with Docker Compose v2. No cloud account is required. The first build compiles a pinned official MinIO source revision because its old Docker Hub image is no longer available; allow several minutes for this build. MinIO is used only for local development; production uses Spaces.
 
 ```sh
 cp .env.example .env

@@ -17,3 +17,5 @@ work/
 .DS_Store
 coverage.xml
 .coverage
+*.tsbuildinfo
+*.agekey
