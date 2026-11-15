@@ -1,111 +1,106 @@
-# FastZip - Project Proposal
+# FastZip
 
-**Course:** ECE1779 - Introduction to Cloud Computing  
-**Team members:** Yuxin Duan, Kevin Li, Xi Chen, Ouyi Yang
+Private image and video compression with a React frontend, FastAPI API, PostgreSQL-backed job queue, and independently scalable workers.
 
-## 1. Motivation
+**Course:** ECE1779 · **Team:** Yuxin Duan, Kevin Li, Xi Chen, Ouyi Yang
+The original design and team responsibilities remain in [the project proposal](proposal/FastZip_Proposal.md). This branch implements the complete application. The local destination happens to be named ECE779; the course name follows the proposal.
 
-Photos and videos are central to communication and coursework, but large files are slow to upload and often exceed size limits: a short 1080p screen recording can be several times larger than Gmail's 25 MB attachment limit, and course platforms and messaging apps impose similar caps. Our target users are students submitting recorded presentations or video assignments, and people who regularly share media under such limits, often from laptops or phones with little processing power.
+## Run locally
 
-Desktop tools such as HandBrake require installation and encoding knowledge. Online compressors often cap file sizes, give little visibility into long-running jobs, and are vague about how long files are kept. Browser-side encoding avoids uploads but is slow and battery-intensive on low-end devices.
+Install Docker Engine / Docker Desktop with Docker Compose v2. No cloud account is required.
 
-**FastZip** offloads image and video compression to cloud workers. Users register with an email address, upload a file, choose a preset, and download the result from any device; media is deleted automatically after 24 hours. The project also exercises core cloud challenges: distributed job coordination, state that survives container failures, secure handling of private files, and operational visibility.
+```sh
+cp .env.example .env
+docker compose up --build -d
+```
 
-## 2. Objectives, Architecture, and Key Features
+Open **http://localhost:8080**, create an account, and upload a JPEG, PNG, or MP4. Bucket initialization and Alembic migrations run before the API and workers start. The private MinIO console is available at http://localhost:9001 using the local credentials in `.env`. PostgreSQL is not published to the host.
 
-### Objectives and scope
+```sh
+# Create an administrator through the server-side CLI; prompts for a password.
+docker compose exec api fastzip create-admin admin@example.com
+# Scale compression independently of HTTP traffic.
+docker compose up -d --scale worker=2
+# Inspect services and logs.
+docker compose ps
+docker compose logs --tail=100 api worker cleanup
+# Stop while keeping accounts, job history, and media volumes.
+docker compose down
+```
 
-We will build a stateful cloud-native application with an asynchronous upload → compress → status → download workflow. Our goals are to:
+Do not use `docker compose down -v` unless you intend to erase local data. For access from another device, configure Compose port bindings, `PUBLIC_ORIGIN`, and a publicly reachable `S3_PUBLIC_ENDPOINT`; localhost-only bindings are the default.
 
-1. Build a web frontend and a **Python FastAPI** backend with email accounts and an administrator portal.
-2. Persist accounts, sessions, jobs, and error events in **PostgreSQL** on a **DigitalOcean Volume**.
-3. Process jobs with replicated, containerized compression workers.
-4. Deploy on two **DigitalOcean Droplets** with **Docker Swarm**, demonstrating replication, load balancing, monitoring, and alerting.
-5. Implement **Security Enhancements**, a **CI/CD Pipeline**, and **Backup and Recovery**.
+## Supported workflow
 
-The MVP supports JPEG/PNG images (≤20 MB, ≤25 megapixels) and MP4 videos (≤100 MB, ≤1080p, ≤2 minutes), one file per job and at most three active jobs per account, with *smaller*, *balanced*, and *higher quality* presets. Users see job status (`QUEUED`, `PROCESSING`, `SUCCEEDED`, `FAILED`, `EXPIRED`), processing time, and size savings, and can download the original if compression does not help. Media expires after 24 hours; job history stays in the account. Email verification, password reset, batch jobs, editing, GPU encoding, and streaming are out of scope.
+Register / sign in → upload one file → select a preset → poll job status → download a private result. The API returns `202` after it validates and stores an upload. Jobs are `QUEUED`, `PROCESSING`, `SUCCEEDED`, `FAILED`, or `EXPIRED`. Completed jobs show size savings and processing time. The original is selected automatically when the encoded result is larger.
 
-### System architecture
+| Input | Limits | Output |
+| --- | --- | --- |
+| JPEG / static PNG | 20 MiB, 25 million pixels | WebP, with alpha preserved and EXIF removed |
+| MP4 | 100 MiB, 120 seconds, at most 1920×1080 or 1080×1920 | H.264 + AAC MP4 |
 
-![System architecture](https://raw.githubusercontent.com/NatMartini/fastzip1779/bbb3b9597802e516710c81839373faf5c055faeb/proposal/architecture.png)
+The limits use binary megabytes (MiB). Animated PNG, batch uploads, editing, streaming, GPU encoding, email verification, and password reset are outside this MVP. Up to three queued/processing jobs are allowed per account. Media becomes unavailable 24 hours after upload; cleanup deletes objects on its next 30-second sweep. Account job metadata remains.
 
-**Frontend and API:** Caddy terminates HTTPS, serves the built React frontend, and routes `/api/*` to FastAPI, so both share one origin and cookies stay first-party. FastAPI handles registration, login, and upload validation, stores the original in Spaces, creates a `QUEUED` job, and returns `202 Accepted`; the frontend then polls job status. Sessions live in PostgreSQL rather than process memory, so any API replica can serve any request without sticky sessions.
+| Preset | WebP quality | H.264 CRF |
+| --- | ---: | ---: |
+| Smaller file | 55 | 32 |
+| Balanced | 75 | 26 |
+| Higher quality | 88 | 21 |
 
-**Workers and coordination:** Workers compress images to WebP with Pillow and MP4 videos to H.264/AAC with FFmpeg, one job at a time under CPU, memory, and runtime limits. They claim jobs atomically with `FOR UPDATE SKIP LOCKED`; time-limited leases let another worker retry after a crash, and attempt IDs stop stale workers from overwriting newer results. Jobs that exhaust their retries become `FAILED` and are logged. Using PostgreSQL instead of Redis or RabbitMQ avoids extra infrastructure but requires custom retry logic.
+Presets control quality, rather than guaranteeing a target output size. Video encoding uses one FFmpeg thread and a 300-second timeout; the isolated encoding subprocess has an additional outer deadline. Container limits bound CPU and memory.
 
-**Media storage:** Private DigitalOcean Spaces holds originals and outputs, so workers on either node share files through the S3 API without a shared filesystem, at the cost of network transfer time. Downloads use 5-minute presigned URLs issued after an ownership check, keeping large transfers off the API at the cost of links being briefly shareable; a cleanup service deletes expired and orphaned objects.
+## Architecture
 
-**Administrator portal:** Admin accounts are created only by a server-side CLI on the Swarm manager, never through the web app, and admins see job metadata but not user media. The dashboard shows queue depth, jobs by status, throughput, failure rate, worker heartbeats, the last backup result, and droplet CPU/memory from the DigitalOcean Monitoring API. The error log lists structured events (service, node, job, message) that the API, workers, and backup service write to PostgreSQL, filterable by time and service.
+```text
+Browser → Caddy (HTTPS + React) → FastAPI replicas → PostgreSQL
+                                      ↓                 ↑
+                                private S3 / Spaces ← workers
+                                      ↑                 ↓
+                                   cleanup      leases / heartbeats
 
-### Course technologies
+PostgreSQL → pg_dump → age public-key encryption → separate backup bucket
+```
 
-- **Docker and Docker Compose:** The frontend, API, worker, and backup service each have a Dockerfile. Compose runs them locally with PostgreSQL and MinIO (an S3-compatible stand-in for Spaces), so the full workflow runs without cloud credentials.
-- **PostgreSQL and persistent storage:** PostgreSQL is a single-replica Swarm service pinned by node label to the droplet with an attached 10 GB DigitalOcean Volume, so data survives container restarts and redeployments. We avoid managed PostgreSQL because it would not demonstrate persistent storage. Alembic manages migrations.
-- **Orchestration:** Droplet A (Swarm manager) runs Caddy, PostgreSQL, the backup and cleanup schedulers, and one API replica; Droplet B runs a second API replica. Workers spread across both nodes with CPU limits, and PostgreSQL has a resource reservation so encoding cannot starve it. Swarm provides overlay networking, VIP load balancing across API replicas, health checks, and rolling updates. We run one manager because two managers cannot tolerate a manager failure under Raft quorum; losing Droplet A stops the database and control plane, a risk we accept and mitigate with backups.
-- **Monitoring and observability:** The DigitalOcean metrics agent runs on both droplets, with alert policies that email the team when CPU or memory stays above 80% or Volume disk usage exceeds 75%. Logs and the admin dashboard cover application health. We will compare throughput with one, two, and four workers.
+PostgreSQL owns accounts, hashed session identifiers, jobs, rate limits, worker heartbeats, error events, and backup results. `FOR UPDATE SKIP LOCKED` assigns jobs without blocking other workers. A 60-second lease is renewed every 10 seconds. Expired leases can be reclaimed up to three attempts. Publication checks the attempt ID and unexpired lease; an old worker cannot replace a newer result. Processing is **at least once** with a single accepted result, rather than an exactly-once encoding guarantee. Each attempt has its own output key; cleanup sweeps orphaned objects after two hours.
 
-### Advanced feature 1: Security Enhancements
+The API checks ownership before issuing a signed URL valid for up to five minutes, shortened near media expiry. API replicas share database sessions and rate limits and require no sticky sessions. Admin endpoints expose metadata and operational health; the admin role does not grant access to another user's files.
 
-**HTTPS** uses Caddy with automatic Let's Encrypt certificates for our domain (fastzip1779.site). Passwords are hashed with Argon2id, and registration and login are rate-limited. Random session IDs are kept in `HttpOnly`, `Secure`, `SameSite=Lax` cookies and revoked on logout, and state-changing requests require a CSRF token. **Role-based authorization** checks job ownership on every request, so users see and download only their own files, and restricts `/api/admin/*` to admins. Uploads are checked by file signature and FFprobe metadata; FFmpeg runs without a shell, and workers run as non-root. Database passwords, Spaces keys, the session secret, and the monitoring token are **Docker Swarm secrets**, and each Spaces key is scoped to one bucket.
+## Security
 
-**Verification:** Test cross-user and non-admin access, malformed and oversized uploads, secrets absent from images and `docker inspect`, and expired download links.
+Passwords use Argon2id; passwords must contain 12–128 characters. Sessions are random, persisted as keyed hashes, expire after seven days, and are revoked on logout. Cookies are HttpOnly and SameSite=Lax; production requires HTTPS and Secure cookies. All state-changing routes, including login and registration, require a signed double-submit CSRF token; origins are checked against `PUBLIC_ORIGIN`. Login and registration limits are enforced in PostgreSQL across API replicas.
 
-### Advanced feature 2: CI/CD Pipeline
+File signatures and decoded image / FFprobe metadata are checked instead of trusting extensions or MIME headers. FFmpeg is invoked without a shell and with a restricted protocol whitelist. Application containers run as UID 10001. Production secrets are read from Swarm-mounted files, and private age recovery keys are never deployed. Use separate bucket-scoped Spaces credentials for media and backups.
 
-On every pull request, **GitHub Actions** runs linting, unit tests, and API tests against a PostgreSQL service container. Merges to `main` build all images, tag them with the commit SHA, and push them to **GitHub Container Registry (GHCR)**. The deploy job connects to the manager over SSH, runs migrations, executes `docker stack deploy --with-registry-auth`, waits for convergence, and runs a smoke test that registers a user and completes an upload-to-download cycle. Swarm's `failure_action: rollback` reverts updates that fail health checks; if the smoke test fails, the workflow redeploys the previous tag. Migrations stay backward-compatible so rollback is safe.
+## Development and verification
 
-**Verification:** A failing test must block deployment, and a deliberately broken image must roll back automatically.
+Python 3.12+, Node 22, FFmpeg/FFprobe, and a **disposable PostgreSQL** database are required for non-container development. The tests deliberately refuse SQLite because it cannot verify PostgreSQL row locks.
 
-### Advanced feature 3: Backup and Recovery
+```sh
+uv sync --frozen --extra dev
+export TEST_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@localhost:5432/fastzip_test
+uv run ruff check backend tests migrations scripts
+uv run ruff format --check backend tests migrations scripts
+uv run pytest -q
+cd frontend
+npm ci
+npm run format:check
+npm run build
+```
 
-A single-replica backup service runs `pg_dump` hourly, encrypts each dump with an `age` public key, and uploads it to a separate private Spaces bucket, keeping 24 hourly and 7 daily copies. The private key stays offline, so a compromised server cannot read backups. Each run's result appears on the admin dashboard, and failures in the error log. The Volume survives container replacement, while backups cover corruption, accidental deletion, and droplet loss. Because media expires after 24 hours, a restore reconciles job records with objects still in Spaces and marks jobs with missing files `EXPIRED`.
+The test database is truncated between tests. Do not point it at a development or production database that contains valuable data. Tests use an S3 mock; the Compose smoke job verifies real MinIO separately. Frontend development runs with `npm run dev`; Vite proxies `/api` to port 8000. For a native API process, set `DATABASE_URL`, `PUBLIC_ORIGIN`, and both S3 endpoints, then run `fastzip migrate` and `uvicorn fastzip.api:app`. The schema is available at `/api/openapi.json`.
 
-**Verification:** Restore a backup into a fresh database, compare job records, and measure backup size, restore time, and the actual data-loss window. With successful hourly backups, our target recovery point is within one hour.
+```sh
+uv run python scripts/smoke.py --base-url http://localhost:8080
+uv run python scripts/smoke.py --base-url http://localhost:8080 --file /path/to/video.mp4
+```
 
-### Design tradeoffs and feasibility
+See [validation evidence](docs/validation.md) for measured local results and explicit outstanding cloud checks. CI runs lint, format, PostgreSQL-backed tests, frontend checks/build, container builds, and an actual Compose upload-to-download smoke test. Main-branch releases depend on all checks, publish SHA-tagged multi-platform GHCR images, and deploy only when `DEPLOY_ENABLED=true` is configured. CI is not a substitute for enabling required checks in repository branch protection.
 
-Swarm has fewer features than Kubernetes but covers the replication, load balancing, rolling updates, and secrets we need with simpler operations. Strict file limits and bounded worker resources keep encoding load predictable on two droplets, at an estimated US$55/month (two 2 vCPU/4 GB droplets, a 10 GB Volume, and Spaces) covered by student credits.
+## Deployment, operations, and recovery
 
-## 3. Project Plan and Team Responsibilities
+- [Two-Droplet Swarm deployment and CI/CD](docs/deployment.md)
+- [Encrypted backups and fresh-database recovery](docs/recovery.md)
+- [Failure, rollback, and scaling experiments](docs/experiments.md)
+- [AI assistance and implementation decisions](ai-session.md)
 
-### Milestones
-
-| Date (2026) | Work and evidence |
-| --- | --- |
-| Nov 2–7 | OpenAPI contract, database schema, repository, Compose skeleton; submit proposal. |
-| Nov 8–14 | Accounts and sessions, upload/status/download API, job queue, image worker, frontend pages; end-to-end flow on Compose with MinIO. |
-| Nov 15–21 | Video worker, Spaces, two-droplet Swarm with Volume, Caddy HTTPS, DigitalOcean alerts, admin dashboard. |
-| Nov 22–24 | Core requirements demo-ready in the cloud; security and initial CI/CD; backup prototype; introduction (Nov 23) and slides (Nov 24). |
-| Nov 25–Dec 2 | Present; complete error log, backup and restore drill, rollback test, and worker-scaling and failure-recovery measurements. |
-| Dec 3–5 | Final validation, 2–5 minute video, `README.md`, and `ai-session.md`. |
-
-### Ownership
-
-| Member | Initial responsibility |
-| --- | --- |
-| Yuxin Duan | FastAPI endpoints, accounts and sessions, authorization, admin API, upload validation |
-| Kevin Li | Compression workers (Pillow/FFmpeg), job claiming, leases and retries, Spaces storage module, cleanup service, worker heartbeats |
-| Xi Chen | Compose, two-droplet Swarm, Volume, Caddy HTTPS, Swarm secrets, DigitalOcean monitoring and alerts |
-| Ouyi Yang | React frontend (user pages, admin dashboard, error log), GitHub Actions, smoke and end-to-end tests |
-
-Advanced feature owners: **Security**, Yuxin (HTTPS and secrets with Xi); **CI/CD**, Ouyi; **Backup and Recovery**, Xi (restore reconciliation with Kevin).
-
-**Integration:** We fix the OpenAPI contract and Alembic schema first so the frontend can build against mocked responses. Workers depend on the schema and storage module; MinIO lets them integrate before Spaces is ready. CI/CD depends on the Swarm stack file, and the admin dashboard on the error-event and heartbeat tables. Work merges through reviewed pull requests with passing CI, and a weekly end-to-end smoke test on Compose later gates deployment.
-
-**Risks:** Swarm networking, HTTPS, encoding load, and crash recovery are the main schedule risks, so we deploy early. If time runs short, Security and CI/CD take priority over Backup, and dashboard charts are cut before any required technology.
-
-## 4. Initial Team Reasoning and AI-Assisted Exploration
-
-### 4.1 Initial Team Reasoning
-
-Our starting idea was an easy-to-use compressor for images and videos that would not require installing software. We initially imagined a single web service that both accepted uploads and ran compression, deployed with Docker Swarm on DigitalOcean and limited to common image formats and short MP4 videos to control cost.
-
-Our open questions were whether CPU-heavy video encoding would block web requests, how several workers could coordinate without processing the same job twice, and how to share job state and files across containers on different nodes.
-
-### 4.2 Exploration and Evaluation
-
-Team discussion and AI-assisted exploration led us to separate the API from the workers so it stays responsive, with PostgreSQL for coordination and Spaces for shared media.
-
-One AI-assisted discussion concerned worker coordination. `FOR UPDATE SKIP LOCKED` prevents duplicate claims, but when we asked what happens if a worker crashes mid-job, we concluded that locking alone would leave the job stuck or let a stale result overwrite a retry. We added leases, bounded retries, and attempt IDs, and will verify them by killing a worker mid-job and confirming the job is reclaimed and completed exactly once.
-
-Our scope also changed. The first draft used anonymous browser sessions, so users lost their history when cookies were cleared and operators could not see failures; we replaced them with email accounts and an admin portal. An AI review of the draft against the rubric noted that we had not planned monitoring alerts or specified service placement on our two droplets; we confirmed both against the handout and added them.
+`backend/fastzip/` contains the API and background services, `frontend/` the React application, `migrations/` the frozen database migrations, `deploy/` the Caddy / Swarm / host-monitoring configuration, and `scripts/` the smoke test, deployment, monitoring setup, and workload runner. `uv.lock`, `requirements.lock`, and `frontend/package-lock.json` lock application dependencies. Backend Dockerfile targets `api`, `worker`, and `backup` produce separate images; the frontend has its own Dockerfile.
