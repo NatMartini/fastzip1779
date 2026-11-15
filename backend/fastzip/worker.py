@@ -15,7 +15,7 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from fastzip.config import settings
-from fastzip.db import record_error, session_factory
+from fastzip.db import node_name, record_error, session_factory
 from fastzip.media import validate
 from fastzip.models import ErrorEvent, Heartbeat, Job, now
 from fastzip.storage import storage
@@ -50,7 +50,7 @@ def claim(worker_id=WORKER_ID) -> Job | None:
                 db.add(
                     ErrorEvent(
                         service="worker",
-                        node=socket.gethostname(),
+                        node=node_name(),
                         job_id=job.id,
                         message="Retry limit exhausted after an expired lease",
                     )
@@ -90,7 +90,7 @@ def heartbeat(worker_id=WORKER_ID, job: Job | None = None) -> bool:
                 return False
         statement = insert(Heartbeat).values(
             worker_id=worker_id,
-            node=socket.gethostname(),
+            node=node_name(),
             job_id=job.id if job else None,
             seen_at=now(),
         )
@@ -100,7 +100,7 @@ def heartbeat(worker_id=WORKER_ID, job: Job | None = None) -> bool:
                 set_={
                     "seen_at": now(),
                     "job_id": job.id if job else None,
-                    "node": socket.gethostname(),
+                    "node": node_name(),
                 },
             )
         )
@@ -146,7 +146,7 @@ def fail(job: Job):
             db.add(
                 ErrorEvent(
                     service="worker",
-                    node=socket.gethostname(),
+                    node=node_name(),
                     job_id=job.id,
                     message="Compression attempt failed"
                     + ("; retries exhausted" if exhausted else "; queued for retry"),

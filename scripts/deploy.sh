@@ -33,7 +33,7 @@ for _ in $(seq 1 60); do
   if [[ -n "$database_container" ]] && docker exec "$database_container" pg_isready -U fastzip -d fastzip >/dev/null; then break; fi
   sleep 2
 done
-docker service create --detach=true --name "$migration_name" --restart-condition none \
+docker service create --detach=true --no-healthcheck --name "$migration_name" --restart-condition none \
   --constraint node.role==manager --network fastzip_private --with-registry-auth \
   --secret source=fastzip_db_password,target=db_password \
   --secret source=fastzip_session_secret,target=session_secret \

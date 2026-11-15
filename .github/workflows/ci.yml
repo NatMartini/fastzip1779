@@ -48,8 +48,17 @@ jobs:
         with: {version: "0.13.8"}
       - run: uv sync --frozen
       - run: docker compose config --quiet
+      - run: docker compose --profile backup build backup
       - run: docker compose up --build -d
       - run: uv run python scripts/smoke.py --timeout 240
+      - run: docker compose exec -T api python scripts/check_link_expiry.py
+      - run: docker compose run --rm --no-deps backup python scripts/recovery_smoke.py
+      - name: Validate production Swarm configuration
+        run: |
+          set -a
+          source deploy/production.env.example
+          set +a
+          docker stack config -c deploy/stack.yaml >/dev/null
       - name: Container logs
         if: failure()
         run: docker compose logs --tail=100
