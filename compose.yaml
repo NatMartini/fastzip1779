@@ -77,7 +77,7 @@ services:
     build: {context: ., dockerfile: backend/Dockerfile, target: backup}
     environment: *environment
     depends_on: {migrate: {condition: service_completed_successfully}, init-storage: {condition: service_completed_successfully}}
-    tmpfs: [/tmp:size=512m,mode=1777]
+    tmpfs: ["/tmp:size=512m,mode=1777"]
     restart: unless-stopped
   frontend:
     build: {context: ., dockerfile: frontend/Dockerfile}
