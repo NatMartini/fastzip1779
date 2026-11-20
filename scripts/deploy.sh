@@ -94,6 +94,27 @@ cleanup
 trap - EXIT
 trap rollback ERR
 docker stack deploy --resolve-image changed --with-registry-auth -c deploy/stack.yaml fastzip
+# Docker Swarm stack deploy does not apply the Compose tmpfs setting.
+# Explicitly mount writable /tmp while keeping the root filesystem read-only.
+for service in backup worker cleanup api; do
+  if [[ "$service" == "api" ]]; then
+    tmpfs_size=268435456
+  else
+    tmpfs_size=67108864
+  fi
+
+  service_name="fastzip_$service"
+
+  # Avoid adding a duplicate mount on subsequent deployments.
+  if ! docker service inspect "$service_name" \
+    --format '{{json .Spec.TaskTemplate.ContainerSpec.Mounts}}' |
+    grep -q '"Target":"/tmp"'; then
+    docker service update \
+      --detach=true \
+      --mount-add "type=tmpfs,destination=/tmp,tmpfs-size=$tmpfs_size" \
+      "$service_name"
+  fi
+done
 python3 scripts/wait_stack.py --tag "$IMAGE_TAG" --timeout "$convergence_timeout"
 docker run --rm --network host "$REGISTRY/api:$IMAGE_TAG" python scripts/smoke.py --base-url "https://$DOMAIN"
 printf '%s\n' "$IMAGE_TAG" > /opt/fastzip/current-tag.next
