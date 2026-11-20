@@ -3,11 +3,13 @@
 Private image and video compression with a React frontend, FastAPI API, PostgreSQL-backed job queue, and independently scalable workers.
 
 **Course:** ECE1779 · **Team:** Yuxin Duan, Kevin Li, Xi Chen, Ouyi Yang
-The original design and team responsibilities remain in [the project proposal](proposal/FastZip_Proposal.md). This branch implements the complete application.
+The original design and team responsibilities are in [the project proposal](proposal/FastZip_Proposal.md). See [validation evidence](docs/validation.md) for verified behavior and remaining cloud acceptance checks.
 
 ## Run locally
 
 Install Docker Engine / Docker Desktop with Docker Compose v2. No cloud account is required. The first build compiles a pinned official MinIO source revision because its old Docker Hub image is no longer available; allow several minutes for this build. MinIO is used only for local development; production uses Spaces.
+
+On Windows, double-click `start.bat`. It creates `.env` on first use, starts the stack, and opens the site once the API is ready. Use `.\start.bat --no-browser` from a terminal to skip opening the browser. To start manually, run:
 
 ```sh
 cp .env.example .env
@@ -15,6 +17,8 @@ docker compose up --build -d
 ```
 
 Open **http://localhost:8080**, create an account, and upload a JPEG, PNG, or MP4. Bucket initialization and Alembic migrations run before the API and workers start. The private MinIO console is available at http://localhost:9001 using the local credentials in `.env`. PostgreSQL is not published to the host.
+
+For manual Windows setup, copy the sample with `Copy-Item .env.example .env`. If port 8080 is occupied, set `FASTZIP_PORT=8088` in `.env` and open `http://localhost:8088`. Compose derives the browser origin from `FASTZIP_PORT` when `PUBLIC_ORIGIN` is unset. If an existing `.env` sets `PUBLIC_ORIGIN`, update that value to match.
 
 ```sh
 # Create an administrator through the server-side CLI; prompts for a password.
@@ -97,6 +101,12 @@ uv run python scripts/smoke.py --base-url http://localhost:8080 --file /path/to/
 See [validation evidence](docs/validation.md) for measured local results and explicit outstanding cloud checks. CI runs lint, format, PostgreSQL-backed tests, frontend checks/build, container builds, and an actual Compose upload-to-download smoke test. Main-branch releases depend on all checks, publish SHA-tagged multi-platform GHCR images, and deploy only when `DEPLOY_ENABLED=true` is configured. CI is not a substitute for enabling required checks in repository branch protection.
 
 ## Deployment, operations, and recovery
+
+After the two-Droplet infrastructure is prepared and the release images are published, deploy from Windows with one command. Copy `deploy/cloud.psd1.example` to `deploy/.env.cloud.psd1` and fill in the SSH settings and published commit SHA. [Cloud setup and release instructions](docs/deployment.md#windows-release-command)
+
+```powershell
+powershell -NoProfile -File .\scripts\deploy-cloud.ps1
+```
 
 - [Two-Droplet Swarm deployment and CI/CD](docs/deployment.md)
 - [Encrypted backups and fresh-database recovery](docs/recovery.md)

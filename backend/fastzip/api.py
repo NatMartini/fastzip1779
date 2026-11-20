@@ -18,7 +18,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 
@@ -59,6 +59,10 @@ class Credentials(BaseModel):
 
 def account_json(account: User):
     return {"id": str(account.id), "email": account.email, "role": account.role}
+
+
+def active_jobs():
+    return Job.status.in_(["QUEUED", "PROCESSING"]) & (Job.expires_at > now())
 
 
 def job_json(job: Job):
@@ -210,13 +214,7 @@ def upload(
         # Serialize submissions per account, including across API replicas.
         db.scalar(select(User).where(User.id == account.id).with_for_update())
         active = db.scalar(
-            select(func.count())
-            .select_from(Job)
-            .where(
-                Job.user_id == account.id,
-                Job.status.in_(["QUEUED", "PROCESSING"]),
-                Job.expires_at > now(),
-            )
+            select(func.count()).select_from(Job).where(Job.user_id == account.id, active_jobs())
         )
         if active >= settings().max_active_jobs:
             raise HTTPException(409, "You already have three active jobs; wait for one to finish")
@@ -255,11 +253,17 @@ def jobs(
     offset: int = Query(0, ge=0),
     limit: int = Query(30, ge=1, le=100),
 ):
-    query = select(Job).where(Job.user_id == account.id).order_by(Job.created_at.desc())
-    count = db.scalar(select(func.count()).select_from(Job).where(Job.user_id == account.id))
+    query = select(Job).where(Job.user_id == account.id).order_by(Job.created_at.desc(), Job.id)
+    total, active = db.execute(
+        select(func.count(), func.count().filter(active_jobs()))
+        .select_from(Job)
+        .where(Job.user_id == account.id)
+    ).one()
     return {
         "items": [job_json(job) for job in db.scalars(query.offset(offset).limit(limit))],
-        "total": count,
+        "total": total,
+        "active_count": active,
+        "active_limit": settings().max_active_jobs,
     }
 
 
@@ -313,14 +317,9 @@ def download(
 
 @app.get("/api/admin/overview", dependencies=[Depends(admin)])
 def overview(db: DBSession = Depends(database)):
-    counts = dict(
-        db.execute(
-            select(Job.status, func.count()).where(Job.expires_at > now()).group_by(Job.status)
-        ).all()
-    )
-    counts["EXPIRED"] = db.scalar(
-        select(func.count()).select_from(Job).where(Job.expires_at <= now())
-    )
+    status = case((Job.expires_at <= now(), "EXPIRED"), else_=Job.status).label("effective_status")
+    counts = dict(db.execute(select(status, func.count()).group_by(status)).all())
+    counts.setdefault("EXPIRED", 0)
     since = now() - timedelta(hours=24)
     succeeded = db.scalar(
         select(func.count())

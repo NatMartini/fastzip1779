@@ -122,6 +122,8 @@ def test_concurrent_account_limit(client, account, image):
         statuses = list(pool.map(submit, range(6)))
     assert statuses.count(202) == 3
     assert statuses.count(409) == 3
+    page = client.get("/api/jobs?offset=3").json()
+    assert page == {"items": [], "total": 3, "active_count": 3, "active_limit": 3}
 
 
 def test_rate_limit_is_database_backed(client, monkeypatch):
@@ -135,6 +137,7 @@ def test_rate_limit_is_database_backed(client, monkeypatch):
 def test_admin_only_sees_metadata(client, account, image):
     identifier = upload(client, image).json()["id"]
     with session_factory()() as db, db.begin():
+        db.get(Job, uuid.UUID(identifier)).status = "EXPIRED"  # Reconciled by restore.
         db.add(User(email="admin@example.com", password_hash="unused", role="admin"))
         admin = db.scalar(select(User).where(User.email == "admin@example.com"))
         from fastzip.security import digest
@@ -148,7 +151,9 @@ def test_admin_only_sees_metadata(client, account, image):
         )
     with TestClient(app) as operator:
         operator.cookies.set("fastzip_session", "admin-test")
-        assert operator.get("/api/admin/overview").status_code == 200
+        overview = operator.get("/api/admin/overview")
+        assert overview.status_code == 200
+        assert overview.json()["jobs_by_status"]["EXPIRED"] == 1
         metadata = operator.get("/api/admin/jobs").json()["items"][0]
         assert "original_key" not in metadata and "filename" not in metadata
         assert operator.get(f"/api/jobs/{identifier}/download?kind=original").status_code == 404

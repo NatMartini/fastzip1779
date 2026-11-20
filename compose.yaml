@@ -3,7 +3,7 @@ x-environment: &environment
   DB_HOST: postgres
   DB_PASSWORD: ${POSTGRES_PASSWORD:-local-db-only}
   SESSION_SECRET: ${SESSION_SECRET:-local-development-only-change-before-deployment}
-  PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+  PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:${FASTZIP_PORT:-8080}}
   SECURE_COOKIES: "false"
   S3_ENDPOINT: http://minio:9000
   S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
@@ -82,7 +82,7 @@ services:
   frontend:
     build: {context: ., dockerfile: frontend/Dockerfile}
     environment: {SITE_ADDRESS: ":80"}
-    ports: ["127.0.0.1:8080:80"]
+    ports: ["127.0.0.1:${FASTZIP_PORT:-8080}:80"]
     depends_on: [api]
     volumes: [caddy-data:/data, caddy-config:/config]
     restart: unless-stopped

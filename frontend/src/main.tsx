@@ -16,7 +16,9 @@ import {
   ChevronRight,
   Clock3,
   CloudUpload,
+  FileCheck2,
   FileImage,
+  Files,
   Film,
   FolderClock,
   LayoutDashboard,
@@ -53,19 +55,19 @@ const presets = [
   {
     id: "smaller",
     label: "Smaller file",
-    note: "Keep it light",
+    note: "Maximum compression",
     icon: ArrowDown,
   },
   {
     id: "balanced",
     label: "Balanced",
-    note: "The happy medium",
+    note: "Size and clarity",
     icon: Sparkles,
   },
   {
     id: "higher_quality",
     label: "Higher quality",
-    note: "Keep the details",
+    note: "Preserve more detail",
     icon: FileImage,
   },
 ];
@@ -80,6 +82,25 @@ function Brand() {
     </span>
   );
 }
+
+function CompressionMotion() {
+  return (
+    <div className="compression-motion" aria-hidden="true">
+      <span className="motion-file motion-input">
+        <Files />
+      </span>
+      <span className="motion-lane">
+        <span className="motion-bolt">
+          <Zap fill="currentColor" />
+        </span>
+      </span>
+      <span className="motion-file motion-output">
+        <FileCheck2 />
+      </span>
+    </div>
+  );
+}
+
 function Notice({ text, clear }: { text: string; clear: () => void }) {
   return (
     <div className="notice" role="alert">
@@ -119,52 +140,32 @@ function Auth({ done }: { done: (account: Account) => void }) {
       <div className="auth-story">
         <Brand />
         <div className="story-copy">
-          <span className="eyebrow light">LESS WEIGHT. MORE POSSIBILITY.</span>
           <h1>
-            A little lighter.
-            <br />A lot easier.
-          </h1>
-          <p>
-            Make room for the things you want to share.
+            Compress images
             <br />
-            Compress your images and videos in the cloud.
-          </p>
-          <div className="file-illustration" aria-hidden="true">
-            <div className="illustration-file big">
-              <FileImage size={49} strokeWidth={1.3} />
-              <span>Your next big idea.png</span>
-              <b>12.8 MB</b>
-            </div>
-            <div className="illustration-arrow">
-              <ArrowRight />
-            </div>
-            <div className="illustration-file small">
-              <CheckCircle2 size={38} strokeWidth={1.4} />
-              <span>Ready to share</span>
-              <b>A little lighter</b>
-            </div>
-          </div>
+            and videos.
+          </h1>
+          <p>Reduce the size of a JPEG, PNG, or MP4 before sharing.</p>
+          <CompressionMotion />
           <div className="story-footer">
             <ShieldCheck size={18} /> Private files. Automatically deleted after
             24 hours.
           </div>
         </div>
-        <span className="auth-bottom">GOOD THINGS COME IN SMALLER FILES.</span>
       </div>
       <main className="auth-main">
         <div className="auth-card">
-          <span className="eyebrow">YOUR SPACE TO SHARE</span>
-          <h2>
-            {mode === "login" ? "Welcome back." : "Make yourself at home."}
-          </h2>
+          <h2>{mode === "login" ? "Sign in" : "Create an account"}</h2>
           <p className="muted">
             {mode === "login"
-              ? "Sign in and pick up where you left off."
-              : "Create an account to keep your files in one place."}
+              ? "Access your compression jobs and downloads."
+              : "Use your email to keep your compression history."}
           </p>
           <div className="auth-tabs">
             <button
               className={mode === "login" ? "selected" : ""}
+              aria-pressed={mode === "login"}
+              disabled={busy}
               onClick={() => {
                 setMode("login");
                 setError("");
@@ -174,6 +175,8 @@ function Auth({ done }: { done: (account: Account) => void }) {
             </button>
             <button
               className={mode === "register" ? "selected" : ""}
+              aria-pressed={mode === "register"}
+              disabled={busy}
               onClick={() => {
                 setMode("register");
                 setError("");
@@ -205,12 +208,20 @@ function Auth({ done }: { done: (account: Account) => void }) {
               minLength={12}
               maxLength={128}
               required
-              placeholder="At least 12 characters"
+              aria-describedby={
+                mode === "register" ? "password-note" : undefined
+              }
             />
-            <span className="field-note">Use 12–128 characters.</span>
+            {mode === "register" && (
+              <span id="password-note" className="field-note">
+                Use 12–128 characters.
+              </span>
+            )}
             <button className="primary auth-submit" disabled={busy}>
               {busy ? (
-                <LoaderCircle className="spin" size={18} />
+                <>
+                  <LoaderCircle className="spin" size={18} /> Please wait…
+                </>
               ) : (
                 <>
                   {mode === "login" ? "Sign in" : "Create your account"}
@@ -219,10 +230,6 @@ function Auth({ done }: { done: (account: Account) => void }) {
               )}
             </button>
           </form>
-          <p className="auth-privacy">
-            <ShieldCheck size={15} /> Your uploads stay private and expire after
-            24 hours.
-          </p>
         </div>
       </main>
     </div>
@@ -234,9 +241,20 @@ function JobRow({
   download,
 }: {
   job: Job;
-  download: (job: Job, original?: boolean) => void;
+  download: (job: Job, original?: boolean) => Promise<void>;
 }) {
   const Icon = job.media_type === "image" ? FileImage : Film;
+  const [downloading, setDownloading] = useState<"original" | "result" | null>(
+    null,
+  );
+  async function save(kind: "original" | "result") {
+    setDownloading(kind);
+    try {
+      await download(job, kind === "original");
+    } finally {
+      setDownloading(null);
+    }
+  }
   return (
     <article className="job-row">
       <div className={"file-icon " + job.media_type}>
@@ -251,12 +269,19 @@ function JobRow({
           {job.processing_seconds !== null && (
             <>
               <span className="separator">·</span>
-              {job.processing_seconds.toFixed(1)}s
+              <span className="job-duration">
+                {job.processing_seconds < 1
+                  ? `${Math.round(job.processing_seconds * 1000)} ms`
+                  : `${job.processing_seconds.toFixed(1)} s`}{" "}
+                processing
+              </span>
             </>
           )}
-          <span className="expiry-note">
-            Available until {date(job.expires_at)}
-          </span>
+          {job.status === "SUCCEEDED" && (
+            <span className="expiry-note">
+              Available until {date(job.expires_at)}
+            </span>
+          )}
         </span>
       </div>
       <div className="job-result">
@@ -272,8 +297,8 @@ function JobRow({
             </strong>
             <span>
               {job.original_is_smaller
-                ? "Original is smaller"
-                : `${job.savings_percent}% smaller`}
+                ? "Original retained"
+                : `${job.savings_percent ?? 0}% smaller`}
             </span>
           </>
         ) : (
@@ -293,26 +318,34 @@ function JobRow({
         )}
       </div>
       <div className="job-actions">
-        {job.status === "SUCCEEDED" ? (
+        {job.status === "SUCCEEDED" && (
           <>
             <button
               className="download"
-              onClick={() => download(job)}
+              onClick={() => void save("result")}
+              disabled={downloading !== null}
               aria-label={"Download " + job.filename}
             >
-              <ArrowDownToLine size={18} />
-              <span>Download</span>
+              {downloading === "result" ? (
+                <LoaderCircle className="spin" size={18} />
+              ) : (
+                <ArrowDownToLine size={18} />
+              )}
+              <span>
+                {job.original_is_smaller ? "Download original" : "Download"}
+              </span>
             </button>
             {!job.original_is_smaller && (
-              <button className="original" onClick={() => download(job, true)}>
+              <button
+                className="original"
+                onClick={() => void save("original")}
+                disabled={downloading !== null}
+                aria-label={"Download original " + job.filename}
+              >
                 Original
               </button>
             )}
           </>
-        ) : (
-          <span className="job-time">
-            {active(job) ? "We’ll take it from here" : "File unavailable"}
-          </span>
         )}
       </div>
     </article>
@@ -363,6 +396,7 @@ function Admin() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [events, setEvents] = useState<ErrorEvent[]>([]);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [metricsError, setMetricsError] = useState(false);
   const [service, setService] = useState("");
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
@@ -400,10 +434,13 @@ function Admin() {
     const load = () =>
       api<Metrics>("/admin/metrics")
         .then((data) => {
-          if (mounted) setMetrics(data);
+          if (mounted) {
+            setMetrics(data);
+            setMetricsError(false);
+          }
         })
-        .catch((error) => {
-          if (mounted) setError(message(error));
+        .catch(() => {
+          if (mounted) setMetricsError(true);
         });
     void load();
     const timer = setInterval(load, 60000);
@@ -416,8 +453,7 @@ function Admin() {
     <>
       <div className="page-heading">
         <div>
-          <span className="eyebrow">OPERATIONS</span>
-          <h1>A clear view of the work.</h1>
+          <h1>Administration</h1>
           <p className="muted">
             Service health and job metadata. User media stays private.
           </p>
@@ -427,7 +463,7 @@ function Admin() {
       {error && <Notice text={error} clear={() => setError("")} />}
       {!overview ? (
         <p className="muted" role="status">
-          Loading service health…
+          {error ? "Service health is unavailable." : "Loading service health…"}
         </p>
       ) : (
         <>
@@ -511,7 +547,15 @@ function Admin() {
           </div>
           <section className="panel">
             <h2>Infrastructure</h2>
-            {!metrics?.configured ? (
+            {metricsError ? (
+              <p className="muted">
+                Couldn’t refresh infrastructure metrics. Retrying automatically.
+              </p>
+            ) : !metrics ? (
+              <p className="muted" role="status">
+                Loading infrastructure metrics…
+              </p>
+            ) : !metrics.configured ? (
               <p className="muted">
                 Connect DigitalOcean Monitoring to see droplet CPU, memory, and
                 disk usage.
@@ -650,55 +694,73 @@ function Workspace({
   const [view, setView] = useState<"compress" | "history" | "admin">(
     "compress",
   );
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState<{
+    items: Job[];
+    total: number;
+    active_count: number;
+    active_limit: number;
+    offset: number;
+  } | null>(null);
   const [offset, setOffset] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [preset, setPreset] = useState("balanced");
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [loaded, setLoaded] = useState(false);
+  const [jobsError, setJobsError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
   const [announcement, setAnnouncement] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  const refresh = useCallback(async () => {
-    const data = await api<{ items: Job[]; total: number }>(
-      "/jobs?limit=30&offset=" + offset,
-    );
-    setJobs(data.items);
-    setTotal(data.total);
-    setLoaded(true);
-  }, [offset]);
   useEffect(() => {
-    let mounted = true;
-    const load = () => {
-      if (mounted)
-        void refresh().catch((error) => {
-          if (mounted) {
-            if (error instanceof ApiError && error.status === 401) signOut();
-            else setError(message(error));
-          }
-        });
-    };
-    load();
-    const timer = setInterval(load, 3000);
+    if (view === "admin") return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function load() {
+      let delay = 3000;
+      try {
+        const data = await api<Omit<NonNullable<typeof page>, "offset">>(
+          "/jobs?limit=30&offset=" + offset,
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        setPage({ ...data, offset });
+        setJobsError("");
+        if (data.active_count === 0) delay = 10000;
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof ApiError && error.status === 401) {
+          signOut();
+          return;
+        }
+        setJobsError(message(error));
+      }
+      timer = setTimeout(() => void load(), delay);
+    }
+    void load();
     return () => {
-      mounted = false;
-      clearInterval(timer);
+      controller.abort();
+      clearTimeout(timer);
     };
-  }, [refresh, signOut]);
+  }, [offset, refreshKey, signOut, view]);
+  function clearFile() {
+    setFile(null);
+    if (input.current) input.current.value = "";
+  }
   function choose(file: File | undefined) {
     if (!file) return;
+    setAnnouncement("");
     const image = /\.(jpg|jpeg|png)$/i.test(file.name);
     if (!/\.(jpg|jpeg|png|mp4)$/i.test(file.name)) {
+      clearFile();
       setError("Choose a JPEG, PNG, or MP4 file.");
       return;
     }
     if (file.size > (image ? 20 : 100) * 1024 * 1024 || file.size === 0) {
+      clearFile();
       setError(
         image
-          ? "Choose a nonempty image up to 20 MB."
-          : "Choose a nonempty video up to 100 MB.",
+          ? "Choose a nonempty image up to 20 MiB."
+          : "Choose a nonempty video up to 100 MiB.",
       );
       return;
     }
@@ -707,25 +769,30 @@ function Workspace({
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!file) return;
+    if (!file || busy || atLimit) return;
     setBusy(true);
     setError("");
+    setAnnouncement("");
     const form = new FormData();
     form.set("file", file);
     form.set("preset", preset);
     try {
-      await api<Job>("/jobs", { method: "POST", body: form });
-      setFile(null);
-      if (input.current) input.current.value = "";
-      setAnnouncement("File uploaded. Your compression job is in the queue.");
-      await refresh();
+      const job = await api<Job>("/jobs", { method: "POST", body: form });
+      clearFile();
+      setAnnouncement(
+        `${job.filename} uploaded. Check its status in your jobs.`,
+      );
+      setRefreshKey((key) => key + 1);
     } catch (error) {
       setError(message(error));
+      if (error instanceof ApiError && error.status === 409)
+        setRefreshKey((key) => key + 1);
     } finally {
       setBusy(false);
     }
   }
   async function download(job: Job, original = false) {
+    setError("");
     try {
       const result = await api<{ url: string }>(
         "/jobs/" +
@@ -739,29 +806,27 @@ function Workspace({
       anchor.click();
     } catch (error) {
       setError(message(error));
+      if (error instanceof ApiError && error.status === 410)
+        setRefreshKey((key) => key + 1);
     }
   }
-  const currentActive = jobs.filter(active).length;
+  const jobs = page?.offset === offset ? page.items : [];
+  const total = page?.total ?? 0;
+  const currentActive = page?.active_count;
+  const activeLimit = page?.active_limit;
+  const atLimit =
+    currentActive !== undefined &&
+    activeLimit !== undefined &&
+    currentActive >= activeLimit;
   const shown = view === "compress" ? jobs.slice(0, 5) : jobs;
-  const saved = jobs.reduce(
-    (sum, job) =>
-      sum +
-      (job.status === "SUCCEEDED"
-        ? Math.max(
-            0,
-            job.original_size - (job.output_size ?? job.original_size),
-          )
-        : 0),
-    0,
-  );
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <Brand />
-        <span className="sidebar-label">YOUR WORKSPACE</span>
         <nav aria-label="Main navigation">
           <button
             className={view === "compress" ? "selected" : ""}
+            aria-current={view === "compress" ? "page" : undefined}
             onClick={() => {
               setView("compress");
               setOffset(0);
@@ -773,6 +838,7 @@ function Workspace({
           </button>
           <button
             className={view === "history" ? "selected" : ""}
+            aria-current={view === "history" ? "page" : undefined}
             onClick={() => setView("history")}
           >
             <FolderClock size={19} />
@@ -781,6 +847,7 @@ function Workspace({
           {account.role === "admin" && (
             <button
               className={view === "admin" ? "selected" : ""}
+              aria-current={view === "admin" ? "page" : undefined}
               onClick={() => setView("admin")}
             >
               <LayoutDashboard size={19} />
@@ -790,8 +857,8 @@ function Workspace({
         </nav>
         <div className="privacy-card">
           <ShieldCheck size={24} />
-          <strong>A private little space.</strong>
-          <p>Only you can access your files. We delete media after 24 hours.</p>
+          <strong>Private uploads</strong>
+          <p>Files are deleted after 24 hours. Your job history is kept.</p>
         </div>
         <div className="account">
           <span className="avatar">{account.email[0].toUpperCase()}</span>
@@ -818,61 +885,44 @@ function Workspace({
         </div>
       </aside>
       <div className="main-shell">
-        <header className="topbar">
-          <span>
-            Workspace <ChevronRight size={13} />
-            {view === "compress"
-              ? "New compression"
-              : view === "history"
-                ? "File history"
-                : "Administration"}
-          </span>
-          <span className="topbar-note">
-            <ShieldCheck size={14} />
-            Private by default
-          </span>
-        </header>
         <main className="content">
-          <div className="sr-only" role="status" aria-live="polite">
-            {announcement}
-          </div>
           {error && <Notice text={error} clear={() => setError("")} />}
           {view === "admin" ? (
             <Admin />
           ) : (
             <>
-              <div className="page-heading">
+              <div
+                className={
+                  view === "compress"
+                    ? "page-heading compress-heading"
+                    : "page-heading"
+                }
+              >
                 <div>
-                  <span className="eyebrow">
-                    {view === "compress"
-                      ? "A LITTLE LIGHTER"
-                      : "YOUR RECENT WORK"}
-                  </span>
                   <h1>
-                    {view === "compress"
-                      ? "Big ideas. Smaller files."
-                      : "Everything you’ve shared."}
+                    {view === "compress" ? "Compress a file" : "File history"}
                   </h1>
                   <p className="muted">
                     {view === "compress"
-                      ? "Drop it in, lighten it up, and send it on its way."
-                      : "Your history stays here. Files are available for 24 hours."}
+                      ? "Upload an image or video and choose how much to compress it."
+                      : "Track your jobs and download results within 24 hours of upload."}
                   </p>
                 </div>
-                <span className="heading-doodle" aria-hidden="true">
-                  <Sparkles size={35} strokeWidth={1.1} />
-                </span>
+                {view === "compress" && <CompressionMotion />}
               </div>
               {view === "compress" && (
                 <div className="workspace-grid">
                   <form className="upload-panel" onSubmit={submit}>
                     <div className="step-label">
-                      <span>01</span>
-                      <h2>Pick your file</h2>
-                      <span className="step-note">One at a time</span>
+                      <h2>Choose a file</h2>
+                      {currentActive !== undefined && (
+                        <span className="step-note">
+                          {currentActive} of {activeLimit} jobs active
+                        </span>
+                      )}
                     </div>
                     <input
-                      className="sr-only"
+                      hidden
                       id="file"
                       type="file"
                       accept=".jpg,.jpeg,.png,.mp4"
@@ -897,7 +947,11 @@ function Workspace({
                       onDrop={(e) => {
                         e.preventDefault();
                         setDrag(false);
-                        if (!busy) choose(e.dataTransfer.files[0]);
+                        if (busy) return;
+                        if (e.dataTransfer.files.length > 1) {
+                          clearFile();
+                          setError("Choose one file at a time.");
+                        } else choose(e.dataTransfer.files[0]);
                       }}
                     >
                       <span className="upload-orbit">
@@ -908,27 +962,27 @@ function Workspace({
                         )}
                       </span>
                       <strong>
-                        {file ? file.name : "Drop your file right here"}
+                        {file ? file.name : "Drop a file or browse files"}
                       </strong>
                       <span>
-                        {file ? (
-                          bytes(file.size) +
-                          " · Click to choose a different file"
-                        ) : (
-                          <>
-                            or <u>browse files</u> to get started
-                          </>
-                        )}
-                      </span>
-                      <span className="file-chips">
-                        <span>JPG</span>
-                        <span>PNG</span>
-                        <span>MP4</span>
+                        {file
+                          ? bytes(file.size) +
+                            " · Click to choose a different file"
+                          : "JPEG or PNG up to 20 MiB · MP4 up to 100 MiB"}
                       </span>
                     </button>
+                    {file && (
+                      <button
+                        className="text-button remove-file"
+                        type="button"
+                        onClick={clearFile}
+                        disabled={busy}
+                      >
+                        <X size={16} /> Remove file
+                      </button>
+                    )}
                     <div className="step-label second">
-                      <span>02</span>
-                      <h2>Find your balance</h2>
+                      <h2>Compression quality</h2>
                     </div>
                     <fieldset className="presets">
                       <legend className="sr-only">Compression quality</legend>
@@ -958,7 +1012,7 @@ function Workspace({
                     </fieldset>
                     <button
                       className="primary compress-button"
-                      disabled={!file || busy || currentActive >= 3}
+                      disabled={!file || busy || atLimit}
                     >
                       {busy ? (
                         <>
@@ -972,57 +1026,35 @@ function Workspace({
                         </>
                       )}
                     </button>
-                    <span className="upload-footnote">
-                      {currentActive >= 3
-                        ? "Three jobs are active. You can upload again when one finishes."
-                        : "The cloud does the work. Your device gets a break."}
-                    </span>
-                  </form>
-                  <aside className="tips">
-                    <div className="tip-accent">
-                      <span className="eyebrow">MADE FOR SHARING</span>
-                      <h2>
-                        Same story.
-                        <br />
-                        Less baggage.
-                      </h2>
-                      <p>
-                        From a class presentation to a photo worth sending. Make
-                        your next upload a little easier.
+                    {atLimit && (
+                      <p className="upload-footnote">
+                        Wait for an active job to finish before uploading
+                        another file.
                       </p>
-                      <div className="mini-files" aria-hidden="true">
-                        <span>
-                          <FileImage size={25} />
-                          .png
-                        </span>
-                        <ArrowRight size={21} />
-                        <span>
-                          <FileImage size={25} />
-                          .webp
-                        </span>
-                      </div>
-                    </div>
+                    )}
+                  </form>
+                  <aside className="tips panel">
                     <div className="limits">
-                      <h3>A few good boundaries</h3>
+                      <h2>File requirements</h2>
                       <p>
                         <FileImage size={17} />
                         <span>
-                          <strong>Images up to 20 MB</strong>JPEG or PNG · up to
-                          25 megapixels
+                          <strong>JPEG or static PNG</strong>Up to 25
+                          megapixels. Compresses to WebP.
                         </span>
                       </p>
                       <p>
                         <Film size={17} />
                         <span>
-                          <strong>Videos up to 100 MB</strong>MP4 · up to 1080p
-                          · 2 minutes
+                          <strong>MP4 video</strong>Up to 1080p and 2 minutes.
+                          Compresses to H.264 MP4.
                         </span>
                       </p>
                       <p>
                         <Clock3 size={17} />
                         <span>
-                          <strong>Here for 24 hours</strong>Download before your
-                          files expire
+                          <strong>24-hour download window</strong>FastZip keeps
+                          the original when compression saves no space.
                         </span>
                       </p>
                     </div>
@@ -1032,8 +1064,8 @@ function Workspace({
               <section className="recent panel">
                 <div className="section-heading">
                   <h2>
-                    {view === "compress" ? "Freshly lightened" : "File history"}{" "}
-                    <span className="count">{total}</span>
+                    {view === "compress" ? "Recent jobs" : "All jobs"}{" "}
+                    {page && <span className="count">{total}</span>}
                   </h2>
                   {view === "compress" && total > 0 && (
                     <button
@@ -1045,17 +1077,39 @@ function Workspace({
                     </button>
                   )}
                 </div>
-                {!loaded ? (
-                  <div className="empty">
-                    <LoaderCircle className="spin" />
-                    <p>Loading your files…</p>
+                <div role="status">
+                  {announcement && (
+                    <p className="upload-confirmation">
+                      <CheckCircle2 size={18} />
+                      {announcement}
+                    </p>
+                  )}
+                </div>
+                {jobsError && (
+                  <div className="history-error" role="status">
+                    <span>Couldn’t refresh jobs. {jobsError}</span>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => setRefreshKey((key) => key + 1)}
+                    >
+                      Retry
+                    </button>
                   </div>
+                )}
+                {page?.offset !== offset ? (
+                  !jobsError && (
+                    <div className="empty">
+                      <LoaderCircle className="spin" />
+                      <p>Loading your files…</p>
+                    </div>
+                  )
                 ) : shown.length === 0 ? (
                   <div className="empty">
                     <span>
                       <FolderClock size={26} strokeWidth={1.4} />
                     </span>
-                    <strong>A fresh start.</strong>
+                    <strong>No jobs yet</strong>
                     <p>Your files will appear here after your first upload.</p>
                   </div>
                 ) : (
@@ -1085,18 +1139,6 @@ function Workspace({
                   </div>
                 )}
               </section>
-              <footer className="workspace-footer">
-                <span>
-                  <ShieldCheck size={14} />
-                  Private uploads. A lighter footprint.
-                </span>
-                {saved > 0 && (
-                  <span>
-                    {bytes(saved)} saved on this page <Sparkles size={13} />
-                  </span>
-                )}
-                <span>Made for the things you share.</span>
-              </footer>
             </>
           )}
         </main>
@@ -1124,7 +1166,7 @@ function App() {
       <div className="loading-screen">
         <Brand />
         <LoaderCircle className="spin" />
-        <span>Making a little room…</span>
+        <span>Checking your session…</span>
       </div>
     );
   return (

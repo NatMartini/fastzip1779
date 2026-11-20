@@ -1,6 +1,6 @@
 # Two-Droplet deployment
 
-This is a deployment runbook, not evidence of an existing deployment. Cloud credentials, DNS, actual resource IDs, alert recipients, and SSH access must be configured by the team. Resource creation and paid deployment were not performed during implementation.
+Cloud credentials, DNS, resource IDs, alert recipients, and SSH access are supplied by the team. See [validation evidence](validation.md) for the acceptance checks to run on the target environment.
 
 ## Infrastructure
 
@@ -47,7 +47,7 @@ Copy `deploy/production.env.example` to `/opt/fastzip/production.env`, replace a
 
 ## First deployment and later releases
 
-Build/publish images via the Release workflow only after tests and Compose smoke pass. It is safe to run workflow_dispatch on `develop` to build images; the deployment job only runs for `main` and requires an enabled production environment.
+Build and publish images via the Release workflow after its tests and Compose smoke test pass. For the first release, merge the reviewed implementation and workflow into the default `main` branch. Leave `DEPLOY_ENABLED` disabled while publishing images and preparing the manual deployment. Once the workflow is on the default branch, `workflow_dispatch` can build images for `develop`. Automatic deployment requires a `main` release and `DEPLOY_ENABLED=true`. [GitHub manual workflow requirements](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 
 On the manager, place this checked-out release under `/opt/fastzip/releases/COMMIT_SHA`, then run:
 
@@ -56,7 +56,7 @@ cd /opt/fastzip/releases/COMMIT_SHA
 bash scripts/deploy.sh COMMIT_SHA
 ```
 
-The script serializes deployments, bootstraps only the database/network if necessary, runs Alembic as a one-shot Swarm service with mounted secrets, deploys all services, checks convergence and expected image tags, then performs a real HTTP upload-to-download smoke test. It records the new tag only after success. Failures redeploy the previously successful tag when one exists. Initial deployment failures require fixing the cause and rerunning; there is no earlier release to restore.
+The script serializes deployments, checks the mounted database path, and bootstraps the database and network if needed. It waits for PostgreSQL before running Alembic as a one-shot Swarm service, then deploys the application and checks convergence, image tags, and an HTTPS upload-to-download smoke test. It records the new tag after success. If rollout fails and a previous successful tag exists, it attempts to redeploy that tag and checks convergence. Fix and rerun a failed first release.
 
 API placement uses two replicas and `max_replicas_per_node: 1`. Caddy, PostgreSQL, cleanup, and backup stay on the manager. Workers spread across labeled application nodes; each worker handles one job at a time. The database has resource reservations. Non-database services use read-only root filesystems and temporary writable storage. The frontend update uses stop-first because it binds host ports; a brief frontend interruption is expected during replacement. APIs also cannot start a third temporary replica under the per-node limit, so use stop-first for API updates on this two-node cluster.
 
@@ -66,6 +66,25 @@ To create an admin, run the CLI inside an API container on either node:
 docker ps --filter label=com.docker.swarm.service.name=fastzip_api
 docker exec -it API_CONTAINER_ID fastzip create-admin admin@example.com
 ```
+
+## Windows release command
+
+Complete the infrastructure and secret setup above once. Keep the mounted database directory, manager labels, readable `/opt/fastzip/production.env`, Docker access for the SSH user, and a writable `/opt/fastzip` on the manager. Use Git and Windows OpenSSH on the operator PC. Verify the manager's SSH host key through a trusted channel and place it in the `KnownHostsFile` you specify. If the SSH key uses a passphrase, load it into your SSH agent first.
+
+```powershell
+Copy-Item .\deploy\cloud.psd1.example .\deploy\.env.cloud.psd1
+```
+
+Fill in `ManagerHost`, `ManagerUser`, `KnownHostsFile`, and `ImageTag`. Set `ManagerPort` or `IdentityFile` when needed. Relative paths in this file resolve from the file's directory. Use the full SHA of a commit available locally whose four images passed the GitHub Release workflow and are readable from the manager. The script packages `deploy/` and `scripts/` from that commit, so publish a new commit to include local changes. The filled settings file is ignored by Git.
+
+```powershell
+# Optional prerequisite check through SSH.
+powershell -NoProfile -File .\scripts\deploy-cloud.ps1 -CheckOnly
+# Upload, migrate, deploy, and run the HTTPS smoke test.
+powershell -NoProfile -File .\scripts\deploy-cloud.ps1
+```
+
+Both commands verify the SSH host key, manager and worker labels, mounted database path, Swarm secrets, and accessible image manifests. The release command stages and verifies the archive before calling `scripts/deploy.sh`. Droplet, VPC, Volume, Spaces, DNS, and alert setup use the one-time steps in this runbook. The HTTPS smoke test requires the public DNS record and Caddy certificate issuance to succeed.
 
 ## GitHub Actions configuration
 

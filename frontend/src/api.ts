@@ -55,7 +55,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }
-export const bytes = (value: number) =>
-  value < 1024 * 1024
-    ? `${(value / 1024).toFixed(0)} KB`
-    : `${(value / 1024 / 1024).toFixed(1)} MB`;
+export function bytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MiB`;
+}
