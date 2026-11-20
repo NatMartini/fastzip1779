@@ -142,7 +142,6 @@ networks:
   private:
     driver: overlay
     attachable: true
-    driver_opts: {encrypted: "true"}
 volumes:
   database:
     driver: local

@@ -33,7 +33,9 @@ while time.monotonic() < deadline:
     services = dict(line.split(maxsplit=1) for line in lines)
     complete = services.keys() == expected
     for name, replicas in services.items():
-        running, desired = replicas.split("/")
+        running, desired = replicas.split("/",1)
+        desired = desired.split()[0]
+
         complete = complete and running == desired and int(desired) > 0
         service = json.loads(subprocess.check_output(["docker", "service", "inspect", name]))[0]
         update = service.get("UpdateStatus", {}).get("State", "completed")
