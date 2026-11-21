@@ -4,7 +4,7 @@ Cloud credentials, DNS, resource IDs, alert recipients, and SSH access are suppl
 
 ## Infrastructure
 
-Use two Linux Droplets with Docker Engine, each with 2 vCPU / 4 GB RAM. Choose one private VPC; allow Swarm TCP 2377, TCP/UDP 7946, and UDP 4789 **only between the nodes**. For the encrypted overlay, also permit IP protocol 50 (ESP) between the peers at the host network layer. Expose TCP 80/443 on the manager and restrict SSH to operator/CI addresses. Do not expose PostgreSQL, API port 8000, or the Caddy health listener. Install the DigitalOcean metrics agent on both nodes using the provider's documented installer.
+Use two Linux Droplets with Docker Engine, each with 2 vCPU / 4 GB RAM. Choose one private VPC; allow Swarm TCP 2377, TCP/UDP 7946, and UDP 4789 **only between the nodes**. Because DigitalOcean Cloud Firewalls only support ICMP, TCP, and UDP rules (not IP protocol 50 / ESP), the production overlay network relies on private VPC isolation without IPsec ESP overlay encryption; client traffic is protected by Caddy HTTPS and object storage transfers use TLS (with `age` encryption for backups). Expose TCP 80/443 on the manager and restrict SSH to operator/CI addresses. Do not expose PostgreSQL, API port 8000, or the Caddy health listener. Install the DigitalOcean metrics agent on both nodes using the provider's documented installer.
 
 Attach and mount a 10 GB DigitalOcean Volume on the manager, e.g. `/mnt/fastzip`, using DigitalOcean's generated mount instructions. Verify it is mounted before creating `/mnt/fastzip/postgres`. Ensure boot waits for the Volume mount before Docker services start; otherwise a bind directory on the root disk could be used accidentally. PostgreSQL's official entrypoint sets permissions inside its data directory.
 

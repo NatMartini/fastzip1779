@@ -97,11 +97,11 @@ docker stack deploy --resolve-image changed --with-registry-auth -c deploy/stack
 # Docker Swarm stack deploy does not apply the Compose tmpfs setting.
 # Explicitly mount writable /tmp while keeping the root filesystem read-only.
 for service in backup worker cleanup api; do
-  if [[ "$service" == "api" ]]; then
-    tmpfs_size=268435456
-  else
-    tmpfs_size=67108864
-  fi
+  case "$service" in
+    api|worker) tmpfs_size=268435456 ;;
+    backup) tmpfs_size=134217728 ;;
+    *) tmpfs_size=67108864 ;;
+  esac
 
   service_name="fastzip_$service"
 

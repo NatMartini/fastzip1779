@@ -62,8 +62,12 @@ def main():
         response = client.get(f"/api/jobs/{identifier}/download")
         response.raise_for_status()
         # Never log the signed URL: it grants temporary access to a private object.
-        downloaded = httpx.get(response.json()["url"], timeout=30)
-        downloaded.raise_for_status()
+        try:
+            downloaded = httpx.get(response.json()["url"], timeout=30)
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Signed download request failed: {type(exc).__name__}") from None
+        if not downloaded.is_success:
+            raise RuntimeError(f"Signed download failed with HTTP {downloaded.status_code}")
         assert downloaded.content
         assert len(downloaded.content) == min(job["original_size"], job["output_size"])
         print(

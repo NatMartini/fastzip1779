@@ -115,6 +115,9 @@ def backup_once():
             lock_db.commit()
 
 
+HEARTBEAT_PATH = Path("/tmp/fastzip-backup-heartbeat")
+
+
 def run():
     logging.basicConfig(level=logging.INFO)
     stop = threading.Event()
@@ -122,13 +125,26 @@ def run():
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     next_run = 0.0
     while not stop.is_set():
+        HEARTBEAT_PATH.touch()
         if time.monotonic() >= next_run:
+            started = time.monotonic()
+            done = threading.Event()
+
+            def keep_alive(done=done):
+                while not done.wait(15):
+                    HEARTBEAT_PATH.touch()
+
+            thread = threading.Thread(target=keep_alive, daemon=True)
+            thread.start()
             try:
                 backup_once()
             except Exception:
                 pass
-            next_run = time.monotonic() + 3600
-        Path("/tmp/fastzip-backup-heartbeat").touch()
+            finally:
+                done.set()
+                thread.join(timeout=2)
+                HEARTBEAT_PATH.touch()
+            next_run = started + 3600
         stop.wait(10)
 
 

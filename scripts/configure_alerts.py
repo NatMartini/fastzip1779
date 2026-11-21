@@ -5,6 +5,12 @@ import os
 
 import httpx
 
+POLICIES = (
+    ("cpu", "v1/insights/droplet/cpu", 80),
+    ("memory", "v1/insights/droplet/memory_utilization_percent", 80),
+    ("disk", "v1/insights/droplet/disk_utilization_percent", 75),
+)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -19,7 +25,7 @@ def main():
         response = client.get("alerts", params={"per_page": 200})
         response.raise_for_status()
         existing = {policy["description"]: policy["uuid"] for policy in response.json()["policies"]}
-        for metric, threshold in (("cpu", 80), ("memory", 80), ("disk", 75)):
+        for metric, policy_type, threshold in POLICIES:
             name = f"FastZip {metric} usage above {threshold}%"
             body = {
                 "alerts": {"email": args.emails.split(","), "slack": []},
@@ -28,7 +34,7 @@ def main():
                 "enabled": True,
                 "entities": args.droplets.split(","),
                 "tags": [],
-                "type": f"v1/insights/droplet/{metric}_utilization_percent",
+                "type": policy_type,
                 "value": threshold,
                 "window": "5m",
             }
