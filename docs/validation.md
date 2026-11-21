@@ -1,5 +1,8 @@
 # Validation evidence
 
+For focused session, CSRF, and authorization regression coverage, reproducible
+commands, and recorded results, see [Security regression QA](security-qa.md).
+
 The original implementation was validated locally on November 14, 2026 (America/Toronto) using isolated Python/Node processes, a disposable PostgreSQL database, and Moto for S3-compatible tests; GitHub subsequently ran Docker Compose with real MinIO. **Additional local and production cloud evidence was collected on November 20–21, 2026**, as detailed below. Test outcomes are tied to the versions and environments actually exercised; passing a smoke test does not establish every reliability or security requirement.
 
 | Check | Observed result |
