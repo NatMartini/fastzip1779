@@ -188,6 +188,10 @@ uv run pytest -q
 cd frontend && npm ci && npm run format:check && npm run build && cd ..
 ```
 
+For focused session, CSRF, job ownership, and admin authorization checks, see the
+[Security regression QA guide](docs/security-qa.md) for coverage, an isolated
+PostgreSQL setup, run commands, and recorded results.
+
 Run end-to-end smoke, link-expiry, and encrypted recovery drills against a running Compose stack:
 
 ```sh
