@@ -1,4 +1,40 @@
-"""Regression checks for session lifecycle and browser request protections."""
+"""Regression checks for session lifecycle and browser request protections.
+
+Run from the repository root with Docker running and dev dependencies installed.
+Use only a disposable database: the test fixtures truncate application tables.
+
+First run: create an isolated PostgreSQL 17 container (no app stack required):
+
+    docker run -d --name fastzip-security-qa \
+      -e POSTGRES_USER=fastzip \
+      -e POSTGRES_PASSWORD=test-only \
+      -e POSTGRES_DB=fastzip_security_test \
+      -p 127.0.0.1:55432:5432 \
+      postgres:17-bookworm
+
+For later runs, start the existing container instead:
+
+    docker start fastzip-security-qa
+
+Wait until this command reports "accepting connections":
+
+    docker exec fastzip-security-qa pg_isready -U fastzip -d fastzip_security_test
+
+Run this focused suite (expected: 30 passed) and static checks:
+
+    TEST_DATABASE_URL='postgresql+psycopg://fastzip:test-only@127.0.0.1:55432/fastzip_security_test' \
+      .venv/bin/python -m pytest tests/test_auth_security.py -v
+    .venv/bin/ruff check tests/test_auth_security.py
+    .venv/bin/ruff format --check tests/test_auth_security.py
+    git diff --check
+
+Stop the test database when finished:
+
+    docker stop fastzip-security-qa
+
+The API uses TestClient and object storage uses Moto; these checks do not require
+running API, worker, or MinIO services.
+"""
 
 from datetime import timedelta
 from http.cookies import SimpleCookie
