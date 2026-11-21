@@ -1,0 +1,34 @@
+version: "3.8"
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: fastzip
+      POSTGRES_DB: fastzip
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [database:/var/lib/postgresql/data]
+    networks: [private]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U fastzip -d fastzip"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      placement: {constraints: [node.labels.fastzip.db == true]}
+      resources:
+        reservations: {cpus: "0.25", memory: 512M}
+        limits: {cpus: "1", memory: 1G}
+      update_config: {order: stop-first}
+      restart_policy: {condition: any}
+networks:
+  private:
+    driver: overlay
+    attachable: true
+volumes:
+  database:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${POSTGRES_VOLUME_PATH}"}
+secrets:
+  db_password: {external: true, name: fastzip_db_password}

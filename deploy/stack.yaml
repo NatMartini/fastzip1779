@@ -1,0 +1,158 @@
+version: "3.8"
+x-environment: &environment
+  ENVIRONMENT: production
+  NODE_NAME: "{{.Node.Hostname}}"
+  DB_HOST: postgres
+  DB_PASSWORD_FILE: /run/secrets/db_password
+  SESSION_SECRET_FILE: /run/secrets/session_secret
+  SECURE_COOKIES: "true"
+  PUBLIC_ORIGIN: https://${DOMAIN}
+  S3_ENDPOINT: ${SPACES_ENDPOINT}
+  S3_PUBLIC_ENDPOINT: ${SPACES_ENDPOINT}
+  S3_REGION: ${SPACES_REGION}
+  S3_BUCKET: ${MEDIA_BUCKET}
+  S3_ACCESS_KEY_FILE: /run/secrets/spaces_access
+  S3_SECRET_KEY_FILE: /run/secrets/spaces_secret
+x-secrets: &app-secrets
+  - db_password
+  - session_secret
+  - spaces_access
+  - spaces_secret
+x-update: &update
+  parallelism: 1
+  delay: 10s
+  monitor: 40s
+  failure_action: rollback
+  order: start-first
+x-api: &api
+  image: ${REGISTRY}/api:${IMAGE_TAG}
+  environment: *environment
+  secrets: *app-secrets
+  networks: [private]
+  read_only: true
+  tmpfs: [/tmp]
+  stop_grace_period: 30s
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: fastzip
+      POSTGRES_DB: fastzip
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [database:/var/lib/postgresql/data]
+    networks: [private]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U fastzip -d fastzip"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      placement: {constraints: [node.labels.fastzip.db == true]}
+      resources:
+        reservations: {cpus: "0.25", memory: 512M}
+        limits: {cpus: "1", memory: 1G}
+      update_config: {order: stop-first}
+      restart_policy: {condition: any}
+  api:
+    <<: *api
+    environment:
+      <<: *environment
+      DO_TOKEN_FILE: /run/secrets/do_token
+      DO_DROPLET_IDS: ${DO_DROPLET_IDS}
+    secrets: [db_password, session_secret, spaces_access, spaces_secret, do_token]
+    deploy:
+      replicas: 2
+      placement:
+        constraints: [node.labels.fastzip.app == true]
+        max_replicas_per_node: 1
+      resources:
+        reservations: {memory: 256M}
+        limits: {cpus: "0.5", memory: 768M}
+      update_config:
+        <<: *update
+        order: stop-first
+      rollback_config: {parallelism: 1, order: stop-first}
+  worker:
+    <<: *api
+    image: ${REGISTRY}/worker:${IMAGE_TAG}
+    deploy:
+      replicas: ${WORKER_REPLICAS:-2}
+      placement:
+        constraints: [node.labels.fastzip.app == true]
+        preferences: [{spread: node.id}]
+      resources:
+        reservations: {memory: 256M}
+        limits: {cpus: "0.75", memory: 1G}
+      update_config:
+        <<: *update
+        order: stop-first
+      rollback_config: {parallelism: 1, order: stop-first}
+    stop_grace_period: 330s
+  cleanup:
+    <<: *api
+    command: [python, -m, fastzip.cleanup]
+    healthcheck:
+      test: [CMD, python, -c, "import pathlib,time; assert time.time()-pathlib.Path('/tmp/fastzip-cleanup-heartbeat').stat().st_mtime < 120"]
+      start_period: 60s
+      interval: 30s
+    deploy:
+      replicas: 1
+      placement: {constraints: [node.role == manager]}
+      resources: {limits: {cpus: "0.25", memory: 256M}}
+      update_config:
+        <<: *update
+        order: stop-first
+  backup:
+    <<: *api
+    image: ${REGISTRY}/backup:${IMAGE_TAG}
+    environment:
+      <<: *environment
+      BACKUP_BUCKET: ${BACKUP_BUCKET}
+      BACKUP_ACCESS_KEY_FILE: /run/secrets/backup_access
+      BACKUP_SECRET_KEY_FILE: /run/secrets/backup_secret
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT}
+    secrets: [db_password, session_secret, spaces_access, spaces_secret, backup_access, backup_secret]
+    deploy:
+      replicas: 1
+      placement: {constraints: [node.role == manager]}
+      resources: {limits: {cpus: "0.25", memory: 512M}}
+      update_config:
+        <<: *update
+        order: stop-first
+  frontend:
+    image: ${REGISTRY}/frontend:${IMAGE_TAG}
+    environment: {SITE_ADDRESS: "${DOMAIN}"}
+    ports:
+      - {target: 80, published: 80, protocol: tcp, mode: host}
+      - {target: 443, published: 443, protocol: tcp, mode: host}
+    networks: [private]
+    volumes: [caddy-data:/data, caddy-config:/config]
+    deploy:
+      replicas: 1
+      placement: {constraints: [node.role == manager]}
+      resources: {limits: {cpus: "0.25", memory: 128M}}
+      update_config:
+        <<: *update
+        order: stop-first
+
+networks:
+  private:
+    driver: overlay
+    attachable: true
+volumes:
+  database:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${POSTGRES_VOLUME_PATH}"}
+  caddy-data:
+  caddy-config:
+secrets:
+  db_password: {external: true, name: fastzip_db_password}
+  session_secret: {external: true, name: fastzip_session_secret}
+  spaces_access: {external: true, name: fastzip_spaces_access}
+  spaces_secret: {external: true, name: fastzip_spaces_secret}
+  backup_access: {external: true, name: fastzip_backup_access}
+  backup_secret: {external: true, name: fastzip_backup_secret}
+  do_token: {external: true, name: fastzip_do_token}

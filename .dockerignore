@@ -1,0 +1,13 @@
+.git
+.env*
+.venv
+**/node_modules
+**/dist
+**/__pycache__
+work
+tests
+*.age
+*.dump
+**/*.key
+**/*.pem
+**/*.agekey

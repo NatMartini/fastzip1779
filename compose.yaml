@@ -1,0 +1,94 @@
+name: fastzip
+x-environment: &environment
+  DB_HOST: postgres
+  DB_PASSWORD: ${POSTGRES_PASSWORD:-local-db-only}
+  SESSION_SECRET: ${SESSION_SECRET:-local-development-only-change-before-deployment}
+  PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:${FASTZIP_PORT:-8080}}
+  SECURE_COOKIES: "false"
+  S3_ENDPOINT: http://minio:9000
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+  S3_ACCESS_KEY: ${MINIO_ROOT_USER:-fastzip-local}
+  S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-local-storage-only-change-me}
+  S3_BUCKET: fastzip-media
+  BACKUP_BUCKET: fastzip-backups
+  BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: fastzip
+      POSTGRES_DB: fastzip
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-db-only}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U fastzip -d fastzip"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+  minio:
+    build: {context: ., dockerfile: deploy/minio.Dockerfile}
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-fastzip-local}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-storage-only-change-me}
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    volumes: [minio-data:/data]
+    restart: unless-stopped
+  migrate:
+    build: {context: ., dockerfile: backend/Dockerfile, target: api}
+    environment: *environment
+    command: [fastzip, migrate]
+    depends_on: {postgres: {condition: service_healthy}}
+    healthcheck: {disable: true}
+  init-storage:
+    build: {context: ., dockerfile: backend/Dockerfile, target: api}
+    environment: *environment
+    command: [python, scripts/init_storage.py]
+    depends_on: {minio: {condition: service_started}}
+    healthcheck: {disable: true}
+  api:
+    build: {context: ., dockerfile: backend/Dockerfile, target: api}
+    environment: *environment
+    depends_on: {migrate: {condition: service_completed_successfully}, init-storage: {condition: service_completed_successfully}}
+    restart: unless-stopped
+    mem_limit: 768m
+  worker:
+    build: {context: ., dockerfile: backend/Dockerfile, target: worker}
+    environment: *environment
+    depends_on: {migrate: {condition: service_completed_successfully}, init-storage: {condition: service_completed_successfully}}
+    cpus: 1
+    mem_limit: 1g
+    stop_grace_period: 330s
+    restart: unless-stopped
+  cleanup:
+    build: {context: ., dockerfile: backend/Dockerfile, target: api}
+    environment: *environment
+    command: [python, -m, fastzip.cleanup]
+    depends_on: {migrate: {condition: service_completed_successfully}, init-storage: {condition: service_completed_successfully}}
+    healthcheck:
+      test: [CMD, python, -c, "import pathlib,time; assert time.time()-pathlib.Path('/tmp/fastzip-cleanup-heartbeat').stat().st_mtime < 120"]
+      interval: 30s
+      start_period: 60s
+    restart: unless-stopped
+  backup:
+    profiles: [backup]
+    build: {context: ., dockerfile: backend/Dockerfile, target: backup}
+    environment: *environment
+    depends_on: {migrate: {condition: service_completed_successfully}, init-storage: {condition: service_completed_successfully}}
+    tmpfs: ["/tmp:size=512m,mode=1777"]
+    restart: unless-stopped
+  frontend:
+    build: {context: ., dockerfile: frontend/Dockerfile}
+    environment: {SITE_ADDRESS: ":80"}
+    ports: ["127.0.0.1:${FASTZIP_PORT:-8080}:80"]
+    depends_on: [api]
+    volumes: [caddy-data:/data, caddy-config:/config]
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  minio-data:
+  caddy-data:
+  caddy-config:

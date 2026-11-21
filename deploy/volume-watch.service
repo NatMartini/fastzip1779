@@ -1,0 +1,14 @@
+[Unit]
+Description=FastZip attached Volume usage alert
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/fastzip/volume-watch.env
+ExecStart=/usr/bin/python3 /opt/fastzip/scripts/volume_watch.py
+StateDirectory=fastzip-volume-watch
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/fastzip-volume-watch
