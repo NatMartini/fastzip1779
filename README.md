@@ -52,10 +52,10 @@ Our primary objectives for FastZip are to design, deploy, and validate a statefu
 | **Frontend** | React 19, TypeScript, Vite | Single-page upload workspace, job history, and admin dashboard served statically by Caddy. |
 | **Ingress & TLS** | Caddy 2 | Terminates automatic Let's Encrypt HTTPS (`fastzip1779.site`), serves built assets, sets strict security headers, and reverse-proxies `/api/*` on one origin so session cookies remain first-party. |
 | **Backend & Workers** | Python 3.12, FastAPI, SQLAlchemy 2, Alembic, Pillow, FFmpeg/FFprobe | Synchronous HTTP API (`uvicorn`), Pillow WebP encoding, and isolated shell-less FFmpeg H.264/AAC encoding. |
-| **Database & Persistence** | PostgreSQL 17, DigitalOcean Volume (10 GB) | Single-replica Swarm service pinned via node label (`fastzip.db=true`) to the Droplet with the attached Volume (`/mnt/fastzip/postgres`). We intentionally avoid managed PostgreSQL so persistent storage is directly implemented and validated. |
+| **Database & Persistence** | PostgreSQL 17, DigitalOcean Block Storage Volume | Single-replica Swarm service pinned via node label (`fastzip.db=true`) to the manager Droplet with an attached DigitalOcean Volume mounted at `/mnt/fastzip_postgres` (`/mnt/fastzip_postgres/postgres`, ext4 `/dev/sda`). We intentionally avoid managed PostgreSQL so persistent storage is directly implemented and verified. |
 | **Object Storage** | DigitalOcean Spaces (prod), MinIO built from pinned source (local) | Private S3-compatible buckets decouple media bytes from compute nodes; workers on any node read/write without a shared filesystem. |
-| **Orchestration** | Docker, Docker Compose (local), Docker Swarm (cloud) | Two DigitalOcean Droplets (2 vCPU / 4 GB RAM each) in one private VPC. Chosen over Kubernetes for lower operational overhead while delivering service replication, VIP load balancing, health checks, secrets, and rolling updates/rollbacks. |
-| **Monitoring & Alerts** | DigitalOcean Metrics Agent & Monitoring API, `configure_alerts.py`, `volume-watch.timer` | Built-in DO alerts monitor CPU (>80%), memory (>80%), and root disk (>75%); a host systemd timer monitors the attached Volume (>75% for 5 min). Live Droplet metrics, worker heartbeats, and structured error events render in the Admin Portal. |
+| **Orchestration** | Docker, Docker Compose (local), Docker Swarm (cloud) | Two DigitalOcean Droplets (`fastzip-manager` and `fastzip-worker`) in one private VPC. Chosen over Kubernetes for lower operational overhead while delivering service replication, VIP load balancing, health checks, secrets, and rolling updates/rollbacks. |
+| **Monitoring & Alerts** | DigitalOcean `do-agent` & Insights Alerts, Monitoring API, `configure_alerts.py`, `volume-watch.timer` | `do-agent` runs on both Droplets with Insights alert rules for CPU (≥80%), memory (≥85%), and root disk (≥80%) over 5-minute windows; `scripts/configure_alerts.py` provides an API-based alternative, and `deploy/volume-watch.timer` covers the attached Volume. Live metrics, worker heartbeats, and structured error events render in the Admin Portal. |
 | **CI/CD** | GitHub Actions, GitHub Container Registry (GHCR) | Runs lint/format, PostgreSQL 17 tests, frontend build, full Compose/MinIO smoke + recovery drills, builds multi-platform (`amd64`/`arm64`) SHA-tagged images, and gates SSH Swarm deployment. |
 | **Backup & Encryption** | `pg_dump`, `age`, private backup bucket | Hourly encrypted database snapshots using public-key-only `age` encryption; private decryption keys never touch production servers. |
 
@@ -77,7 +77,7 @@ PostgreSQL → pg_dump → age public-key encryption → separate private backup
 
 - **PostgreSQL queue vs. Redis/RabbitMQ:** Using PostgreSQL `FOR UPDATE SKIP LOCKED` with 60-second leases (renewed every 10 seconds), up to three retry attempts, and attempt-specific output keys avoids operating an extra broker while guaranteeing **at-least-once** processing with a **single accepted publication** (stale workers cannot overwrite newer attempts).
 - **Single-manager Swarm vs. two managers:** A two-manager Raft cluster cannot tolerate losing either manager anyway. Pinning PostgreSQL and the Swarm manager to Droplet A accepts manager-loss downtime and mitigates data loss via off-node encrypted backups and fresh-database restore.
-- **VPC overlay networking:** Swarm overlay traffic stays inside the private DigitalOcean VPC between the two Droplets. IPsec ESP overlay encryption (`encrypted: "true"`) was removed after production testing confirmed DigitalOcean Cloud Firewalls only permit ICMP, TCP, and UDP rules; external client traffic remains protected by Caddy HTTPS and object storage transfers by TLS + `age`.
+- **VPC overlay networking:** Swarm overlay traffic uses an **unencrypted** overlay restricted to the private DigitalOcean VPC between the two nodes, after IPsec ESP overlay encryption (`encrypted: "true"`) caused cross-node connectivity issues under DigitalOcean Cloud Firewall rules (which only cover ICMP, TCP, and UDP). External client traffic remains protected by Caddy HTTPS, and Spaces/backup transfers use TLS plus `age` encryption.
 
 ---
 
@@ -201,18 +201,33 @@ docker compose run --rm --no-deps backup python scripts/recovery_smoke.py
 
 ## Deployment Information
 
-- **Live URL:** [https://fastzip1779.site](https://fastzip1779.site) (health check: `https://fastzip1779.site/api/health/ready`)
-- **Cloud Provider & Topology:** Two DigitalOcean Droplets (2 vCPU / 4 GB RAM each) in a single VPC running Docker Swarm:
-  - **Manager Droplet (`fastzip.db=true`, `fastzip.app=true`):** Caddy (`frontend`), PostgreSQL 17 mounted to a 10 GB DigitalOcean Volume (`/mnt/fastzip/postgres`), API replica 1, `cleanup`, `backup`, and `worker`.
-  - **Worker Droplet (`fastzip.app=true`):** API replica 2 and `worker`.
-  - **Storage & Monitoring:** Two private DigitalOcean Spaces buckets (media and encrypted backups), DigitalOcean metrics agent on both Droplets, DigitalOcean alert policies (`scripts/configure_alerts.py`), and `deploy/volume-watch.timer` for `/mnt/fastzip`.
+- **Live URL:** [https://fastzip1779.site](https://fastzip1779.site) (readiness endpoint: `https://fastzip1779.site/api/health/ready`)
+- **Cloud Provider & Topology:** Two DigitalOcean Droplets (`fastzip-manager` and `fastzip-worker`) in a single private VPC running Docker Swarm:
+  - **Manager Droplet (`fastzip.db=true`, `fastzip.app=true`):** Caddy (`frontend` 1/1), PostgreSQL 17 mounted to the DigitalOcean Block Storage Volume at `/mnt/fastzip_postgres/postgres` (ext4 `/dev/sda`), API replica 1 (`fastzip_api` 2/2 total), `cleanup` 1/1, `backup` 1/1, and `worker`.
+  - **Worker Droplet (`fastzip.app=true`):** API replica 2 and `worker` (`fastzip_worker` 2/2 steady state).
+  - **Storage & Monitoring:** Two private DigitalOcean Spaces buckets (media and encrypted backups), DigitalOcean `do-agent` confirmed active on both nodes, Insights alert rules configured for CPU (≥ 80%), memory (≥ 85%), and root disk (≥ 80%) over 5-minute windows, plus `deploy/volume-watch.timer` for the attached Volume.
+
+### Observed Cloud Validation (November 20–21, 2026)
+
+- **Production deployment & smoke test:** Deployed four-image GHCR release `4b2afbec2c878634cc8aa76774018a42828d2a34` via `scripts/deploy.sh`; all six Swarm services converged (`api` 2/2, `worker` 2/2, `postgres`/`frontend`/`cleanup`/`backup` 1/1) and live HTTPS upload → compress → signed-download smoke testing returned `SUCCEEDED`.
+- **Horizontal worker scaling (`https://fastzip1779.site`):** Benchmarked 12 jobs per run using the same 17.01 MB MP4 file and `balanced` preset (single trial per worker count; includes sequential upload and polling):
+
+| Workers | Jobs | Succeeded | Elapsed (s) | Throughput (jobs/min) | Speedup vs. 1 Worker | Retries |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 12 | 12 | 797.271 | 0.903 | 1.00x | 0 |
+| 2 | 12 | 12 | 390.545 | 1.844 | 2.04x | 0 |
+| 4 | 12 | 12 | 209.112 | 3.443 | 3.81x | 0 |
+
+- **Off-node encrypted backup & restore:** After updating `BACKUP_AGE_RECIPIENT` to the operator-held public key, a live encrypted backup (`hourly/2026-11-20T22-43-10.dump.age`) from the private Spaces backup bucket was decrypted offline (`age -d`, exit `0`) and restored via `pg_restore` (exit `0`) into a network-isolated local PostgreSQL 17 container, recovering **4 users, 2 jobs, and 8 tables** without modifying production.
+- **Explicitly scoped limitations:** End-to-end alert email delivery, Volume-watcher execution, intentional PostgreSQL/worker container-kill drills, and forced bad-image rollback drills have not yet been executed in production and are tracked in [docs/validation.md](docs/validation.md).
+
 - **Windows release command:** After infrastructure preparation and GHCR image publication, copy `deploy/cloud.psd1.example` to `deploy/.env.cloud.psd1`, configure SSH and the published commit SHA, and run:
 
 ```powershell
 powershell -NoProfile -File .\scripts\deploy-cloud.ps1
 ```
 
-Full step-by-step cloud setup, secrets management, rollback procedures, and benchmark commands are documented in:
+Full step-by-step cloud setup, secrets management, rollback procedures, and benchmark details are documented in:
 
 - [Two-Droplet Swarm deployment & CI/CD runbook](docs/deployment.md)
 - [Encrypted backup & fresh-database recovery guide](docs/recovery.md)
@@ -269,5 +284,5 @@ Building and deploying FastZip surfaced several practical cloud-engineering less
 
 1. **Local Compose does not guarantee Swarm or cloud parity:** Moving from Docker Compose to two-Droplet Swarm revealed real infrastructure subtleties—Docker Hub removing official MinIO images (solved via a pinned source build), `docker stack deploy` ignoring Compose `tmpfs:` shorthand on read-only containers (solved via explicit `docker service update --mount-add` in `deploy.sh`), DigitalOcean Cloud Firewalls not supporting IPsec ESP rules for encrypted overlays, and DigitalOcean's built-in disk alert covering only the root disk rather than the attached Volume (requiring a dedicated host systemd timer).
 2. **State coordination requires defensive concurrency design:** Relying solely on `FOR UPDATE SKIP LOCKED` is insufficient when workers crash mid-encode. Combining renewable leases, bounded retries, attempt-specific output keys, and atomic publication guards prevents stale workers from corrupting newer results without introducing an external message broker.
-3. **Defense-in-depth must extend into operational tooling:** Hardening the application meant validating media bytes rather than MIME headers, keeping `age` decryption keys completely offline, restricting admin accounts to server-side CLI creation, and ensuring CI smoke scripts never print presigned download URLs in error tracebacks.
+3. **Defense-in-depth and real recovery drills catch silent failures:** Hardening the application required validating media bytes rather than MIME headers, keeping `age` decryption keys completely offline, restricting admin accounts to server-side CLI creation, and redacting presigned URLs from CI logs. Equally important, actually performing an off-node restore drill caught an early `BACKUP_AGE_RECIPIENT` misconfiguration (pointing to an `age-keygen --help` example key) and a Windows PowerShell 5.1 binary-pipe quirk (`cmd.exe /c` required for streaming `age -d | pg_restore`)—proving that an untested backup is not a verified recovery plan.
 4. **Automated end-to-end CI catches real integration regressions:** Running real PostgreSQL 17 tests, real MinIO link-expiry checks, encrypted backup/restore drills, and strict formatting gates in GitHub Actions prevented regressions from reaching production and gave the team confidence during iterative cloud releases.
