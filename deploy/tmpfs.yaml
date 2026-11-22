@@ -1,0 +1,20 @@
+version: "3.8"
+# Apply with the release's stack so each new task starts with a writable /tmp.
+services:
+  api:
+    volumes: &media-tmp
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 268435456} # 256 MiB
+  worker:
+    volumes: *media-tmp
+  backup:
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 134217728} # 128 MiB
+  cleanup:
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 67108864} # 64 MiB

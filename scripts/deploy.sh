@@ -29,16 +29,25 @@ if [[ ! -d "$POSTGRES_VOLUME_PATH" ]] ||
 fi
 migration_name="fastzip-migrate-${requested_tag:0:12}"
 cleanup() { docker service rm "$migration_name" >/dev/null 2>&1 || true; }
+deploy_release() {
+  local stack=$1 mounts
+  shift
+  mounts="${stack%/*}/tmpfs.yaml"
+  # Archived releases from before the mount file was introduced need it too.
+  if [[ ! -f "$mounts" ]]; then mounts=deploy/tmpfs.yaml; fi
+  docker stack deploy --resolve-image changed --with-registry-auth \
+    -c "$stack" -c "$mounts" fastzip || return
+  python3 scripts/wait_stack.py --tag "$IMAGE_TAG" --timeout "$convergence_timeout" "$@" || return
+  docker run --rm --network host "$REGISTRY/api:$IMAGE_TAG" python scripts/smoke.py --base-url "https://$DOMAIN"
+}
 rollback() {
-  local code=$? previous_stack
-  trap - ERR
+  local code=$1 previous_stack
   if [[ -n "$previous_tag" ]]; then
     export IMAGE_TAG="$previous_tag"
     previous_stack="/opt/fastzip/releases/$previous_tag/deploy/stack.yaml"
     if [[ ! -f "$previous_stack" ]]; then previous_stack=deploy/stack.yaml; fi
-    if docker stack deploy --resolve-image changed --with-registry-auth -c "$previous_stack" fastzip &&
-      python3 scripts/wait_stack.py --tag "$previous_tag" --timeout "$convergence_timeout" --allow-rolled-back; then
-      echo "Swarm converged on previous image tag $previous_tag" >&2
+    if deploy_release "$previous_stack" --allow-rolled-back; then
+      echo "Rolled back and smoke-tested $previous_tag" >&2
     else
       echo "Could not confirm rollback to previous image tag $previous_tag" >&2
     fi
@@ -47,7 +56,7 @@ rollback() {
   fi
   exit "$code"
 }
-docker stack config -c deploy/stack.yaml >/dev/null
+docker stack config -c deploy/stack.yaml -c deploy/tmpfs.yaml >/dev/null
 if ! docker service inspect fastzip_postgres >/dev/null 2>&1; then
   docker stack deploy --with-registry-auth -c deploy/bootstrap.yaml fastzip
 fi
@@ -92,32 +101,7 @@ if [[ "$migrated" != true ]]; then
 fi
 cleanup
 trap - EXIT
-trap rollback ERR
-docker stack deploy --resolve-image changed --with-registry-auth -c deploy/stack.yaml fastzip
-# Docker Swarm stack deploy does not apply the Compose tmpfs setting.
-# Explicitly mount writable /tmp while keeping the root filesystem read-only.
-for service in backup worker cleanup api; do
-  case "$service" in
-    api|worker) tmpfs_size=268435456 ;;
-    backup) tmpfs_size=134217728 ;;
-    *) tmpfs_size=67108864 ;;
-  esac
-
-  service_name="fastzip_$service"
-
-  # Avoid adding a duplicate mount on subsequent deployments.
-  if ! docker service inspect "$service_name" \
-    --format '{{json .Spec.TaskTemplate.ContainerSpec.Mounts}}' |
-    grep -q '"Target":"/tmp"'; then
-    docker service update \
-      --detach=true \
-      --mount-add "type=tmpfs,destination=/tmp,tmpfs-size=$tmpfs_size" \
-      "$service_name"
-  fi
-done
-python3 scripts/wait_stack.py --tag "$IMAGE_TAG" --timeout "$convergence_timeout"
-docker run --rm --network host "$REGISTRY/api:$IMAGE_TAG" python scripts/smoke.py --base-url "https://$DOMAIN"
-printf '%s\n' "$IMAGE_TAG" > /opt/fastzip/current-tag.next
-mv /opt/fastzip/current-tag.next /opt/fastzip/current-tag
-trap - ERR
+deploy_release deploy/stack.yaml || rollback "$?"
+printf '%s\n' "$IMAGE_TAG" > /opt/fastzip/current-tag.next || rollback "$?"
+mv /opt/fastzip/current-tag.next /opt/fastzip/current-tag || rollback "$?"
 echo "Deployed and smoke-tested $IMAGE_TAG"

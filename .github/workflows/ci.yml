@@ -58,7 +58,7 @@ jobs:
           set -a
           source deploy/production.env.example
           set +a
-          docker stack config -c deploy/stack.yaml >/dev/null
+          docker stack config -c deploy/stack.yaml -c deploy/tmpfs.yaml >/dev/null
       - name: Container logs
         if: failure()
         run: docker compose logs --tail=100

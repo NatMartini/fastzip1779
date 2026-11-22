@@ -117,7 +117,7 @@ Presets govern encoding quality rather than guaranteeing a target file size. Vid
 ### Advanced Feature 2: CI/CD Pipeline
 
 - **Continuous Integration (`.github/workflows/ci.yml`):** On every pull request and push to `main`/`develop`, GitHub Actions runs Ruff lint and format checks, the PostgreSQL 17 pytest suite, `requirements.lock` sync verification, frontend Prettier/TypeScript/Vite checks, full `docker compose` build and real MinIO upload-to-download smoke test (`scripts/smoke.py`), provider-side signed-link expiry check (`scripts/check_link_expiry.py`), encrypted backup/restore drill (`scripts/recovery_smoke.py`), and `docker stack config` validation.
-- **Continuous Delivery & Rollback (`.github/workflows/release.yml`, `scripts/deploy.sh`):** Pushes to `main` (and manual `workflow_dispatch`) run the full `Checks` workflow before building and pushing multi-platform (`linux/amd64`, `linux/arm64`) SHA-tagged images (`api`, `worker`, `backup`, `frontend`) to GHCR. When `DEPLOY_ENABLED=true`, the deploy job transfers `deploy/` and `scripts/` over SSH with strict host-key verification, runs one-shot Alembic migrations, deploys the Swarm stack, waits for service convergence (`scripts/wait_stack.py`), and runs an HTTPS smoke test. Swarm's `failure_action: rollback` handles unhealthy updates, and `scripts/deploy.sh` automatically redeploys `/opt/fastzip/current-tag` if post-deploy verification fails.
+- **Continuous Delivery & Rollback (`.github/workflows/release.yml`, `scripts/deploy.sh`):** Pushes to `main` (and manual `workflow_dispatch`) run the full `Checks` workflow before building and pushing multi-platform (`linux/amd64`, `linux/arm64`) SHA-tagged images (`api`, `worker`, `backup`, `frontend`) to GHCR. When `DEPLOY_ENABLED=true`, the deploy job transfers `deploy/` and `scripts/` over SSH with strict host-key verification, runs one-shot Alembic migrations, deploys the Swarm stack, waits for service convergence (`scripts/wait_stack.py`), and runs an HTTPS smoke test. Swarm can roll back an unhealthy service update. If the smoke test fails, `scripts/deploy.sh` restores the tag in `/opt/fastzip/current-tag` with the writable `/tmp` mounts and reruns the upload, compression, and signed download before confirming recovery. The candidate release still reports failure. [Measured rollback results](#fault-recovery-in-an-isolated-swarm)
 
 ### Advanced Feature 3: Backup and Recovery
 
@@ -280,6 +280,32 @@ Full step-by-step cloud setup, secrets management, rollback procedures, and benc
 - [Scaling, crash-recovery & rollback experiment procedures](docs/experiments.md)
 - [Verification & validation evidence log](docs/validation.md)
 
+### Fault recovery in an isolated Swarm
+
+On November 22, 2026, we ran the four faults below on two local Ubuntu 24.04.5 arm64 VMs using Docker Engine 29.1.3 and FastZip release `e9437ef`. We repeated the fourth fault on a fresh two-node Swarm after fixing the deployment script. PostgreSQL 17.12 used a dedicated ext4 filesystem, private MinIO buckets held the media and backups, and the API image trusted the lab's Caddy certificate authority.
+
+Before fault injection, all six services were running, including two API and two worker replicas. An HTTPS upload completed and its signed download returned a 944-byte WebP. Times below are measured from the fault or deployment request.
+
+| Fault injected | Result | What we observed |
+| --- | --- | --- |
+| Killed a worker with `SIGKILL` while FFmpeg was encoding a 30-second 720p video | **Pass** | The container exited with code 137. A different worker reclaimed job `ef51495e-0239-4530-a551-add6f3c42f81` at 60.88 s. At 66.40 s the signed download returned a 6,171,963-byte H.264 video. MinIO contained exactly one result for this job, from attempt 2. |
+| Forced Swarm to replace the PostgreSQL container on the same volume | **Pass** | Container `8618f71de06b` was replaced by `bde5d36ae802` on `fastzip_database`. The database system ID and counts matched before and after (2 users, 2 sessions, 3 jobs). At 15.17 s the original session had retrieved its job history and downloaded the same video with a matching SHA-256. A fresh login also succeeded. |
+| Updated the frontend service to lab image `ec76339`, whose health check always exited 1 | **Pass** | Swarm started rolling back at 21.36 s and reported `rollback_completed` on `e9437ef` at 49.58 s. The release verifier rejected the candidate. By 50.93 s a fresh PNG upload had completed and its signed download returned a 944-byte WebP. |
+| Deployed lab release `1d7a9c7`, whose workers passed health checks but failed to encode | **Pass on retest** | Both workers were healthy and API readiness returned HTTP 200. The failed compression job triggered automatic rollback to `e9437ef`. By 174.10 s the script had verified a fresh upload, compression, and signed download on the restored release. |
+
+**Why the first run failed.** Smoke job `6979b2be-9964-4100-950b-c1058b08b1e5` failed after three attempts. The deploy script exited 1 at 123.56 s, and the next upload returned HTTP 503. At the time, only the forward deployment added writable `/tmp` mounts after applying the stack. Both restored API replicas hit `EROFS`, and backup could not write its heartbeat. A manual redeployment restored service in 84.54 s. A second upload from the existing account also succeeded.
+
+**Automatic rollback with the fix.** The archived `e9437ef` stack predated the new mount file. At 91.90 s we observed that candidate job `3d9388aa-356a-48f4-8768-3d4f4608ca17` had failed after three attempts and the worker service was switching back. The script applied the writable mounts with the archived stack. All six services converged. Its rollback smoke job `00903b7c-674e-4e58-a65f-2dde8d59f2ba` uploaded a 2,791-byte PNG and downloaded the 944-byte result in 2.279 s. The script exited 1 for the rejected candidate and `/opt/fastzip/current-tag` still pointed to `e9437ef`. Recovery required no manual deployment. [Deployment script](scripts/deploy.sh) · [Swarm mount configuration](deploy/tmpfs.yaml)
+
+We then used a session opened before deployment to submit two fresh jobs. Both completed on their first attempt and both signed downloads returned HTTP 200.
+
+| New upload after rollback | Downloaded output | Verification |
+| --- | --- | --- |
+| 2,790-byte PNG | 944-byte WebP | Pillow decoded the 800 × 600 image. The download finished 176.91 s after the deployment request. |
+| 747,646-byte MP4 | 234,843-byte MP4 | The upload returned HTTP 202. FFprobe reported H.264 at 640 × 360 for 4.00 s. FFmpeg decoded all 96 frames. |
+
+On the restored release, UID `10001` created, read, and deleted a temporary file in all six application containers. Each root filesystem was read-only. Each `/tmp` had mode `1777` and the expected capacity, with 256 MiB per API and worker replica, 128 MiB for backup, and 64 MiB for cleanup.
+
 ---
 
 ## Video Demo
@@ -328,7 +354,7 @@ Team ownership was established in the [project proposal](proposal/FastZip_Propos
 
 Building and deploying FastZip surfaced several practical cloud-engineering lessons that cannot be observed in purely local development:
 
-1. **Local Compose does not guarantee Swarm or cloud parity:** Moving from Docker Compose to two-Droplet Swarm revealed real infrastructure subtleties—Docker Hub removing official MinIO images (solved via a pinned source build), `docker stack deploy` ignoring Compose `tmpfs:` shorthand on read-only containers (solved via explicit `docker service update --mount-add` in `deploy.sh`), DigitalOcean Cloud Firewalls not supporting IPsec ESP rules for encrypted overlays, and DigitalOcean's built-in disk alert covering only the root disk rather than the attached Volume (requiring a dedicated host systemd timer).
+1. **Local Compose does not guarantee Swarm or cloud parity:** Moving from Docker Compose to two-Droplet Swarm revealed real infrastructure subtleties—Docker Hub removing official MinIO images (solved via a pinned source build), `docker stack deploy` ignoring Compose `tmpfs:` shorthand on read-only containers (fixed by declaring `type: tmpfs` volumes for both rollout and rollback), DigitalOcean Cloud Firewalls not supporting IPsec ESP rules for encrypted overlays, and DigitalOcean's built-in disk alert covering only the root disk rather than the attached Volume (requiring a dedicated host systemd timer).
 2. **State coordination requires defensive concurrency design:** Relying solely on `FOR UPDATE SKIP LOCKED` is insufficient when workers crash mid-encode. Combining renewable leases, bounded retries, attempt-specific output keys, and atomic publication guards prevents stale workers from corrupting newer results without introducing an external message broker.
 3. **Defense-in-depth and real recovery drills catch silent failures:** Hardening the application required validating media bytes rather than MIME headers, keeping `age` decryption keys completely offline, restricting admin accounts to server-side CLI creation, and redacting presigned URLs from CI logs. Equally important, actually performing an off-node restore drill caught an early `BACKUP_AGE_RECIPIENT` misconfiguration (pointing to an `age-keygen --help` example key) and a Windows PowerShell 5.1 binary-pipe quirk (`cmd.exe /c` required for streaming `age -d | pg_restore`)—proving that an untested backup is not a verified recovery plan.
 4. **Automated end-to-end CI catches real integration regressions:** Running real PostgreSQL 17 tests, real MinIO link-expiry checks, encrypted backup/restore drills, and strict formatting gates in GitHub Actions prevented regressions from reaching production and gave the team confidence during iterative cloud releases.

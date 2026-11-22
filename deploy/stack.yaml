@@ -30,7 +30,7 @@ x-api: &api
   secrets: *app-secrets
   networks: [private]
   read_only: true
-  tmpfs: [/tmp]
+  # The release script applies the writable /tmp mounts from tmpfs.yaml.
   stop_grace_period: 30s
 
 services:
