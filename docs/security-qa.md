@@ -2,9 +2,10 @@
 
 These checks cover API security responsibilities: sessions, CSRF,
 authorization, job ownership, upload failure recovery, administrator metadata
-privacy, and telemetry correctness. They exercise
-existing behavior without changing application code, dependencies, or deployment
-configuration.
+privacy, and telemetry correctness. The original four security suites exercise
+existing behavior without application or deployment changes. The additional
+boundary suites described below include two minimal input-error handling fixes;
+dependencies and deployment configuration remain unchanged.
 
 ## Coverage and expected behavior
 
@@ -46,6 +47,17 @@ database commit failure after a real uncommitted INSERT, and a commit failure
 combined with object deletion failure. The last case intentionally retains a
 Moto orphan; background orphan cleanup is outside this suite. Telemetry tests
 freeze the API clock to check exact boundaries without sleeps.
+
+## Additional boundary suites
+
+Five additional suites cover media/API admission limits, rate windows and
+concurrent increments, CLI administrator provisioning, and password/hash edges.
+Their **96 cases** bring the complete suite to **203 tests**, while the four
+focused security suites documented above remain an 87-case subset.
+
+See [Boundary and Failure-Case Regression Tests](../README.md#boundary-and-failure-case-regression-tests)
+for the per-file case counts, exact scenarios, commands, recorded local results,
+and the two minimal input-error handling corrections exposed by the tests.
 
 ## Run locally
 
@@ -130,25 +142,25 @@ that a suite has passed.
 
 | Area | Remaining scenarios |
 | --- | --- |
-| Admin provisioning CLI | Successful creation and subsequent login; duplicate/invalid email; password length and confirmation mismatch. Current admin fixtures bypass the CLI |
-| Account/API input validation | Password lengths 11/12/128/129; duplicate registration; email normalization; missing/invalid fields; malformed UUID/download kind and invalid pagination |
-| Password handling | Automatic rehash on login and malformed stored password hashes |
-| Rate limiting | Registration and IP limits; window reset; Retry-After; shared counts across clients and concurrent increments |
-| Upload validation | Forged extensions/MIME; truncated JPEG; exact size, duration, and resolution boundaries; FFprobe timeout, invalid JSON, and missing metadata |
+| Admin provisioning CLI | Terminal EOF/interrupt handling and real interactive getpass behavior; boundary suites now exercise successful creation/login, invalid/duplicate email, password limits, and mismatched confirmation |
+| Account/API input validation | Additional credential field-type combinations beyond the selected invalid/missing inputs |
+| Rate limiting | Registration IP isolation across independent HTTP clients and sustained traffic across separate API processes; window boundaries and atomic concurrent database counts are now covered |
+| Upload validation | Additional malformed metadata shapes and real near-limit video encoding under container resource limits; byte/pixel/duration/resolution admission boundaries and selected probe failures are now covered |
 | Filename handling | Path removal, control characters, length truncation, and empty sanitized names |
-| Download edge cases | Missing storage objects and equal-size original/result fallback |
 | Admin APIs | Multi-page admin job ordering; configured DigitalOcean metrics parsing and upstream failure handling |
 | API failure handling | Readiness dependency failures, response security headers, and failure to persist an error event |
+| Transactional object cleanup | Ambiguous database commit outcomes when an original/result object already exists; the boundary suites do not resolve this separately identified reliability issue |
 
-Suggested next order: admin CLI, account/API input validation, rate limiting,
-then upload validation. See [validation.md](validation.md) for broader runtime
+Suggested next order: transactional object cleanup, filename handling, configured
+monitoring failures, then real deployment fault injection. See [validation.md](validation.md) for broader runtime
 evidence; these focused suites do not prove real-browser, TLS-ingress, provider
 storage, worker, backup, or production behavior.
 
 ## CI integration
 
 The existing [Checks workflow](../.github/workflows/ci.yml) runs `uv run pytest -q`,
-which discovers all four files under `tests/`. No workflow changes are needed. Checks
+which discovers the existing security suites and the new boundary suites under
+`tests/`. No workflow changes are needed. Checks
 are triggered on pull requests and pushes to `main` or `develop`; pushing only to
 `qa_dev` does not by itself trigger that workflow. Record the actual Actions run
 for a commit before claiming CI success.

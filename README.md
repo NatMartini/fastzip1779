@@ -192,6 +192,48 @@ For focused session, CSRF, job ownership, and admin authorization checks, see th
 [Security regression QA guide](docs/security-qa.md) for coverage, an isolated
 PostgreSQL setup, run commands, and recorded results.
 
+#### Boundary and Failure-Case Regression Tests
+
+The boundary suites add **96 cases** to the existing 107-test baseline, for
+**203 tests in the full suite**. Parameterized cases are counted individually.
+
+| Suite | Cases | Coverage |
+| --- | ---: | --- |
+| [`test_media_boundaries.py`](tests/test_media_boundaries.py) | 47 | Image sizes just below/at/above 20 MiB; video sizes below/at/above 100 MiB; 25 MP image boundaries; 120-second duration and landscape/portrait 1080p boundaries; zero/multiple video streams; non-finite durations; FFprobe timeout, process failure, invalid JSON, null/missing/wrong-shaped fields; truncated JPEG; encoding timeout and retry without losing the original |
+| [`test_api_boundaries.py`](tests/test_api_boundaries.py) | 28 | Password lengths 11/12/128/129; missing/invalid credentials; case-normalized duplicate registration; malformed UUID, pagination and download kind; file-signature detection despite forged MIME/extension; FFprobe failures returning 422 without objects/jobs; missing download objects; equal-size original fallback |
+| [`test_rate_limit_boundaries.py`](tests/test_rate_limit_boundaries.py) | 6 | Last allowed attempt; rejection before the window ends; reset at the exact next window; `Retry-After`; eight concurrent database connections sharing one quota; registration reset; login limits across IPs and email case |
+| [`test_cli_admin_boundaries.py`](tests/test_cli_admin_boundaries.py) | 9 | CLI admin creation at 12/128-character password limits followed by real HTTP login/admin access; 11/129-character rejection; confirmation mismatch; invalid email; duplicate account rejection without granting an existing user admin rights |
+| [`test_password_boundaries.py`](tests/test_password_boundaries.py) | 6 | Invalid login password lengths preserving the current session; safe rejection of damaged stored hashes; successful login upgrading an outdated Argon2 hash |
+
+Run the new suites from the repository root, using the same **disposable**
+`TEST_DATABASE_URL` as above (fixtures truncate its application tables):
+
+```sh
+uv run --extra dev pytest -q \
+  tests/test_media_boundaries.py tests/test_api_boundaries.py \
+  tests/test_rate_limit_boundaries.py tests/test_cli_admin_boundaries.py \
+  tests/test_password_boundaries.py
+
+# Run the complete regression suite, including the existing real FFmpeg test.
+uv run --extra dev pytest -q
+```
+
+**Recorded local verification — November 22, 2026:** the new suites reported
+`96 passed`, and the complete suite reported `203 passed` (22.10 seconds), using
+Python 3.12.16, native PostgreSQL 16.2, Moto S3, Pillow, and real FFmpeg/FFprobe
+for the existing encoding integration test. One existing Starlette TestClient
+deprecation warning was emitted. The media boundary suite uses real image decoding
+and sparse files for byte limits; its FFprobe metadata/failure cases are stubbed,
+so they do not measure encoding performance of 100 MiB or two-minute videos.
+The repository CI remains configured for PostgreSQL 17; these new local changes
+have not yet been submitted to GitHub Actions.
+
+The tests exposed two input-error handling gaps, fixed with minimal changes:
+invalid FFprobe document/field types now become `InvalidMedia` / HTTP 422 instead
+of unhandled exceptions, and invalid stored Argon2 hash encodings now reject login
+with HTTP 401 instead of returning HTTP 503. Other cloud fault-injection and
+transactional object-cleanup scenarios remain separate validation work.
+
 Run end-to-end smoke, link-expiry, and encrypted recovery drills against a running Compose stack:
 
 ```sh
@@ -261,7 +303,7 @@ AI tools (OpenAI Codex / LLM assistants) were used selectively to accelerate exp
   1. Early AI-assisted design suggestions risked privilege escalation if admin status were keyed to an unverified email address, and initially focused on `SKIP LOCKED` without lease-expiry fencing—we switched to CLI-only admin creation and added renewable leases + attempt-ID output fencing.
   2. Initial container configurations referenced the discontinued Docker Hub MinIO image, assumed `docker stack deploy` honored Compose `tmpfs:` shorthand on read-only containers, enabled IPsec ESP overlay encryption incompatible with DigitalOcean Cloud Firewalls, and generated an invalid DigitalOcean CPU alert metric string (`cpu_utilization_percent` instead of `v1/insights/droplet/cpu`).
   3. An initial frontend upload handler awaited job-history refresh inside the upload try/catch block (surfacing refresh errors as upload failures) and calculated active quota from only the current paginated list.
-- **How correctness was verified:** Every fix was validated through Ruff lint/format checks, 20 PostgreSQL 17 integration tests (row-lock races, stale-worker fencing, CSRF/RBAC, real FFmpeg encoding), frontend Prettier/TypeScript/Vite builds, real MinIO Compose smoke + signed-link expiry + encrypted recovery drills in GitHub Actions CI, desktop/mobile browser testing, and live deployment verification on DigitalOcean Swarm (`https://fastzip1779.site`).
+- **How correctness was verified:** Verification combines Ruff lint/format checks, PostgreSQL-backed integration and regression tests (row-lock races, stale-worker fencing, CSRF/RBAC, boundary cases, real FFmpeg encoding), frontend Prettier/TypeScript/Vite builds, real MinIO Compose smoke + signed-link expiry + encrypted recovery drills in GitHub Actions CI, desktop/mobile browser testing, and live deployment verification on DigitalOcean Swarm (`https://fastzip1779.site`). See the boundary-test section above for the latest local counts and its distinction from the existing CI results.
 
 See [`ai-session.md`](ai-session.md) for four concrete, structured AI interactions documenting prompts, responses, critical evaluation, and verification.
 

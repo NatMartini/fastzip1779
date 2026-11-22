@@ -5,7 +5,7 @@ import time
 from datetime import timedelta
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerificationError
+from argon2.exceptions import InvalidHashError, VerificationError
 from fastapi import Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -94,7 +94,7 @@ def create_session(db: DBSession, account: User, response: Response):
 def verify_password(password: str, hashed: str) -> bool:
     try:
         return hasher.verify(hashed, password)
-    except VerificationError:
+    except (VerificationError, InvalidHashError):
         return False
 
 

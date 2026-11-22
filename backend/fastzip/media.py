@@ -88,7 +88,15 @@ def validate(path: Path) -> tuple[str, str, str]:
             raise InvalidMedia("Video resolution must be at most 1080p")
         if not set(metadata["format"]["format_name"].split(",")) & {"mp4", "mov"}:
             raise InvalidMedia("Invalid MP4 container")
-    except (subprocess.SubprocessError, ValueError, KeyError, OSError) as exc:
+    except (
+        subprocess.SubprocessError,
+        ValueError,
+        KeyError,
+        TypeError,
+        AttributeError,
+        OverflowError,
+        OSError,
+    ) as exc:
         if isinstance(exc, InvalidMedia):
             raise
         raise InvalidMedia("Cannot read MP4 metadata") from exc
