@@ -92,7 +92,9 @@ PostgreSQL → pg_dump → age public-key encryption → separate private backup
 
 ### Supported Media Workflow
 
-Register / sign in → upload a file → select a preset → poll job status (`QUEUED`, `PROCESSING`, `SUCCEEDED`, `FAILED`, `EXPIRED`) → download the result. Uploads return `202 Accepted`. Completed jobs display size savings and processing time, and automatically serve the original file if compression produces a larger output. Media expires 24 hours after upload; the `cleanup` service deletes expired objects every 30 seconds and sweeps orphaned objects after two hours while preserving job metadata.
+After signing in, choose a file and a preset, then submit it for compression. The API returns `202 Accepted` and the client polls the job status (`QUEUED`, `PROCESSING`, `SUCCEEDED`, `FAILED`, `EXPIRED`). Completed jobs show the size savings and processing time. When compression saves no space, FastZip serves the original. Media expires 24 hours after upload. The `cleanup` service deletes expired objects every 30 seconds and sweeps orphaned objects after two hours while preserving job metadata.
+
+File history and original downloads use the same filename. FastZip removes directory prefixes and control characters, keeps the first 160 characters, and uses `upload` if the resulting name is empty.
 
 | Input | Limits (Binary MiB) | Output |
 | --- | --- | --- |
@@ -129,10 +131,12 @@ Presets govern encoding quality rather than guaranteeing a target file size. Vid
 
 ## User Guide
 
-1. **Create an account or sign in:** Open [https://fastzip1779.site](https://fastzip1779.site) (or `http://localhost:8080` locally), switch to **Create account**, enter an email and a 12–128 character password, and submit.
-2. **Upload and choose a preset:** Drag and drop (or browse for) a JPEG, static PNG (≤ 20 MiB), or MP4 video (≤ 100 MiB). Select **Smaller file**, **Balanced**, or **Higher quality**, then click **Compress**.
-3. **Monitor status and download:** The job appears immediately in **Job history** (`QUEUED` → `PROCESSING` → `SUCCEEDED`) and refreshes automatically. Once complete, view original vs. output size, savings percentage, and worker duration, then download either the compressed result (`.webp` / `.mp4`) or the original file before the 24-hour expiration window elapses.
-4. **Administrator Portal (operators only):** Create an admin via the server-side CLI (`docker compose exec api fastzip create-admin admin@example.com` locally, or `docker exec -it <api-container> fastzip create-admin admin@example.com` on Swarm). Sign in with the admin account and open the **Admin** tab to inspect queue depth, 24h throughput/failure rate, online worker heartbeats, DigitalOcean Droplet CPU/memory/filesystem metrics, latest backup status, and filterable error events.
+1. **Create an account or sign in.** Open the live site or `http://localhost:8080` locally. To register, select **Create account**, enter an email address and a 12–128 character password, then select **Create your account**. Returning users can select **Sign in**. [Live site](https://fastzip1779.site)
+2. **Upload and choose a preset.** Drop or browse for a JPEG or static PNG up to 20 MiB, or an MP4 up to 100 MiB. Select **Smaller file**, **Balanced**, or **Higher quality**, then click **Compress file**.
+3. **Track the job and download.** Open **File history** to follow the job as the list refreshes. Completed jobs show file sizes, savings, and processing time. Choose **Download** for the compressed WebP or MP4, or **Original** for the uploaded file. If compression saves no space, the button reads **Download original**. Downloads are available for 24 hours after upload.
+4. **Open the administrator dashboard (operators only).** Create an admin with `docker compose exec api fastzip create-admin admin@example.com` locally, or `docker exec -it <api-container> fastzip create-admin admin@example.com` on Swarm. Pressing Ctrl+C or ending input at either password prompt cancels creation. Sign in with the admin account and open **Administration**.
+
+   The job overview and error log refresh every 10 seconds. The overview shows queue depth, 24-hour throughput and failure rate, worker heartbeats, and the latest backup. The log shows up to 50 events per page for the selected service and time range. **Next** becomes available when another matching event exists. The dashboard requests Droplet CPU, memory, and disk metrics every 60 seconds.
 
 ---
 
@@ -143,7 +147,7 @@ Presets govern encoding quality rather than guaranteeing a target file size. Vid
 - `backend/fastzip/` — FastAPI API (`api.py`), worker (`worker.py`), media validation/encoding (`media.py`), security (`security.py`), storage (`storage.py`), cleanup/reconcile (`cleanup.py`), encrypted backup (`backup.py`), DO monitoring (`monitoring.py`), CLI (`cli.py`).
 - `frontend/` — React/TypeScript Vite application and production Caddy image (`frontend/Dockerfile`).
 - `migrations/` — Frozen Alembic database schema migrations (`alembic.ini`, `migrations/versions/0001_initial.py`).
-- `deploy/` — Production Swarm configs (`bootstrap.yaml`, `stack.yaml`, `Caddyfile`, `production.env.example`, `cloud.psd1.example`), pinned-source `minio.Dockerfile`, and `volume-watch` systemd units.
+- `deploy/` — Production Swarm configs (`bootstrap.yaml`, `stack.yaml`, `tmpfs.yaml`, `Caddyfile`, `production.env.example`, `cloud.psd1.example`), pinned-source `minio.Dockerfile`, and `volume-watch` systemd units.
 - `scripts/` — Deployment (`deploy.sh`, `deploy-cloud.ps1`, `wait_stack.py`), smoke/expiry/recovery verification (`smoke.py`, `check_link_expiry.py`, `recovery_smoke.py`), alerting (`configure_alerts.py`, `volume_watch.py`), and load benchmark (`benchmark.py`).
 - `tests/` — PostgreSQL-backed integration and unit tests (`test_api.py`, `test_queue.py`, `test_media.py`, `test_backup.py`).
 - `docs/` — Runbooks and evidence ([deployment](docs/deployment.md), [recovery](docs/recovery.md), [experiments](docs/experiments.md), [validation](docs/validation.md)).
@@ -195,10 +199,15 @@ PostgreSQL setup, run commands, and recorded results.
 
 #### Boundary and Failure-Case Regression Tests
 
-The boundary suites added **96 cases** to the 107-test baseline. Three restored-media
-audit tests and 12 media commit recovery tests brought the full suite to **218 tests**.
-Four administrator CLI cancellation cases and ten filename cases brought the current
-total to **232 tests**. Parameterized cases are counted individually. [Interrupted commit tests and results](docs/security-qa.md#interrupted-media-commits)
+On November 23, 2026, GitHub Actions passed all **232 backend tests** on PostgreSQL 17
+for `main` commit `91573e0`. The frontend build and Compose smoke checks also
+passed, including the MinIO upload and download, signed-link expiry, and encrypted
+backup and restore. [Checks #21](https://github.com/NatMartini/fastzip1779/actions/runs/45117198295) · [Test log](https://github.com/NatMartini/fastzip1779/actions/runs/45117198295/job/137502624689)
+
+For image publication and deployment status for this commit, see [Release #14](https://github.com/NatMartini/fastzip1779/actions/runs/45117198192).
+
+The six suites below cover **110** of the 232 tests, including ten filename cases.
+Counts include each parameterized case.
 
 | Suite | Cases | Coverage |
 | --- | ---: | --- |
@@ -209,7 +218,7 @@ total to **232 tests**. Parameterized cases are counted individually. [Interrupt
 | [`test_password_boundaries.py`](tests/test_password_boundaries.py) | 6 | Invalid login password lengths preserving the current session; safe rejection of damaged stored hashes; successful login upgrading an outdated Argon2 hash |
 | [`test_filename_handling.py`](tests/test_filename_handling.py) | 10 | Job history and signed download names after directory removal, control-character removal, truncation to 160 characters, or fallback to `upload`. Covers Unix and Windows paths, Unicode, punctuation, original files, and WebP/MP4 results. |
 
-Run the new suites from the repository root, using the same **disposable**
+Run these six suites from the repository root, using the same **disposable**
 `TEST_DATABASE_URL` as above (fixtures truncate its application tables):
 
 ```sh
@@ -222,21 +231,20 @@ uv run --extra dev pytest -q \
 uv run --extra dev pytest -q
 ```
 
-**Recorded local verification — November 22, 2026:** the new suites reported
-`96 passed`, and the complete suite reported `203 passed` (22.10 seconds), using
+**Earlier local runs (November 22, 2026).** The first five boundary suites reported
+`96 passed`, and the full suite at that point reported `203 passed` (22.10 seconds), using
 Python 3.12.16, native PostgreSQL 16.2, Moto S3, Pillow, and real FFmpeg/FFprobe
 for the existing encoding integration test. One existing Starlette TestClient
 deprecation warning was emitted. The media boundary suite uses real image decoding
 and sparse files for byte limits; its FFprobe metadata/failure cases are stubbed,
 so they do not measure encoding performance of 100 MiB or two-minute videos.
-GitHub Actions runs the suite against PostgreSQL 17. The local run including
-the three restored-media audit tests reported `206 passed` in 21.59 seconds.
+A later local run with the three restored-media audit tests reported `206 passed` in 21.59 seconds.
 
 The tests exposed two input-error handling gaps, fixed with minimal changes:
 invalid FFprobe document/field types now become `InvalidMedia` / HTTP 422 instead
 of unhandled exceptions, and invalid stored Argon2 hash encodings now reject login
-with HTTP 401 instead of returning HTTP 503. Other cloud fault-injection and
-transactional object-cleanup scenarios remain separate validation work.
+with HTTP 401 instead of returning HTTP 503. A separate 12-case suite covers
+interrupted commits and object cleanup. [Interrupted commit tests and results](docs/security-qa.md#interrupted-media-commits)
 
 Run end-to-end smoke, link-expiry, and encrypted recovery drills against a running Compose stack:
 
@@ -335,7 +343,7 @@ AI tools (OpenAI Codex / LLM assistants) were used selectively to accelerate exp
   1. Early AI-assisted design suggestions risked privilege escalation if admin status were keyed to an unverified email address, and initially focused on `SKIP LOCKED` without lease-expiry fencing—we switched to CLI-only admin creation and added renewable leases + attempt-ID output fencing.
   2. Initial container configurations referenced the discontinued Docker Hub MinIO image, assumed `docker stack deploy` honored Compose `tmpfs:` shorthand on read-only containers, enabled IPsec ESP overlay encryption incompatible with DigitalOcean Cloud Firewalls, and generated an invalid DigitalOcean CPU alert metric string (`cpu_utilization_percent` instead of `v1/insights/droplet/cpu`).
   3. An initial frontend upload handler awaited job-history refresh inside the upload try/catch block (surfacing refresh errors as upload failures) and calculated active quota from only the current paginated list.
-- **How correctness was verified:** Verification combines Ruff lint/format checks, PostgreSQL-backed integration and regression tests (row-lock races, stale-worker fencing, CSRF/RBAC, boundary cases, real FFmpeg encoding), frontend Prettier/TypeScript/Vite builds, real MinIO Compose smoke + signed-link expiry + encrypted recovery drills in GitHub Actions CI, desktop/mobile browser testing, and live deployment verification on DigitalOcean Swarm (`https://fastzip1779.site`). See the boundary-test section above for the latest local counts and its distinction from the existing CI results.
+- **How correctness was verified:** Verification combines Ruff lint/format checks, PostgreSQL-backed integration and regression tests (row-lock races, stale-worker fencing, CSRF/RBAC, boundary cases, real FFmpeg encoding), frontend Prettier/TypeScript/Vite builds, real MinIO Compose smoke + signed-link expiry + encrypted recovery drills in GitHub Actions CI, desktop/mobile browser testing, and live deployment verification on DigitalOcean Swarm (`https://fastzip1779.site`). [Test counts and CI results](#boundary-and-failure-case-regression-tests)
 
 See [`ai-session.md`](ai-session.md) for four concrete, structured AI interactions documenting prompts, responses, critical evaluation, and verification.
 
