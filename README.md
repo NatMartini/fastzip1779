@@ -123,6 +123,7 @@ Presets govern encoding quality rather than guaranteeing a target file size. Vid
 
 - **Encrypted automated backups (`backend/fastzip/backup.py`):** A single-replica backup service runs hourly using a PostgreSQL advisory lock, executes `pg_dump --format=custom`, encrypts the dump with an `age` public recipient key, deletes the temporary plaintext dump, uploads to a separate private Spaces bucket, and prunes to the latest 24 hourly and 7 daily snapshots. Each run records status, size, and duration in `backup_runs` (surfaced on the Admin Portal) and logs failures to `error_events`.
 - **Fresh-database restore & media reconciliation (`fastzip restore`):** On a trusted recovery host holding the offline `age` private key, the CLI refuses non-empty target databases, decrypts and restores into a fresh PostgreSQL database (`--no-owner --no-acl --exit-on-error`), applies newer additive Alembic migrations, and reconciles restored job rows against live media objects—marking any job whose objects have expired or been deleted as `EXPIRED`.
+- **Measured disaster recovery.** After powering off a local VM, the original HTTPS address accepted a new upload in **107.439 s** from a private MinIO backup and **40.929 s** from a downloaded copy on a second fresh VM. The first trial recovered four of seven jobs. The latest recovered job committed **33.606 s** before the fault. A signed download confirmed the new worker could finish a job in both trials. [Timings and media checks](docs/recovery.md#timed-recovery-on-fresh-vms)
 
 ---
 
@@ -194,8 +195,9 @@ PostgreSQL setup, run commands, and recorded results.
 
 #### Boundary and Failure-Case Regression Tests
 
-The boundary suites add **96 cases** to the existing 107-test baseline, for
-**203 tests in the full suite**. Parameterized cases are counted individually.
+The boundary suites added **96 cases** to the 107-test baseline. Three later
+restored-media audit tests brought the full suite to **206 tests**.
+Parameterized cases are counted individually.
 
 | Suite | Cases | Coverage |
 | --- | ---: | --- |
@@ -225,8 +227,8 @@ for the existing encoding integration test. One existing Starlette TestClient
 deprecation warning was emitted. The media boundary suite uses real image decoding
 and sparse files for byte limits; its FFprobe metadata/failure cases are stubbed,
 so they do not measure encoding performance of 100 MiB or two-minute videos.
-The repository CI remains configured for PostgreSQL 17; these new local changes
-have not yet been submitted to GitHub Actions.
+GitHub Actions runs the suite against PostgreSQL 17. The local run including
+the three restored-media audit tests reported `206 passed` in 21.59 seconds.
 
 The tests exposed two input-error handling gaps, fixed with minimal changes:
 invalid FFprobe document/field types now become `InvalidMedia` / HTTP 422 instead
@@ -265,6 +267,7 @@ docker compose run --rm --no-deps backup python scripts/recovery_smoke.py
 | 4 | 12 | 12 | 209.112 | 3.443 | 3.81x | 0 |
 
 - **Off-node encrypted backup & restore:** After updating `BACKUP_AGE_RECIPIENT` to the operator-held public key, a live encrypted backup (`hourly/2026-11-20T22-43-10.dump.age`) from the private Spaces backup bucket was decrypted offline (`age -d`, exit `0`) and restored via `pg_restore` (exit `0`) into a network-isolated local PostgreSQL 17 container, recovering **4 users, 2 jobs, and 8 tables** without modifying production.
+- The two restored production jobs still need verification against the private Spaces media bucket. The recovery guide includes the command to audit original and output keys and byte counts on the operator's machine. Production outage and write timestamps are still needed for a historical RTO and RPO. [Operator procedure](docs/recovery.md#check-a-downloaded-archive-against-its-media-bucket)
 - **Volume alert delivery.** In an isolated Ubuntu VM, the systemd timer sent an email after a separate ext4 disk stayed above 75% for five minutes. The test inbox received it in 306 seconds, with the same message ID as the timer's journal. Production acceptance still needs the DigitalOcean alert email, the manager's Volume timer evidence and its email in the configured team mailbox. [Measured results](docs/validation.md#volume-alert-delivery) · [Production verification](docs/deployment.md#verify-alert-delivery)
 - **Production fault-injection scope.** Intentional PostgreSQL/worker container-kill drills and forced bad-image rollback drills remain pending in production. [Validation record](docs/validation.md)
 

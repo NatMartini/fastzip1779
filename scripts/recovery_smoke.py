@@ -8,11 +8,13 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from fastzip.backup import backup_once
+from fastzip.backup import audit_restored_media, backup_once
 from fastzip.config import settings
 from fastzip.db import engine
-from sqlalchemy import create_engine, text
+from fastzip.models import Job, now
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.orm import Session
 
 
 def main():
@@ -32,6 +34,9 @@ def main():
                 db.scalar(text("SELECT count(*) FROM users")),
                 db.scalar(text("SELECT count(*) FROM jobs")),
             )
+            completed = db.execute(
+                select(Job.id, Job.expires_at).where(Job.status == "SUCCEEDED")
+            ).all()
         key = backup_once()
         with engine().connect().execution_options(isolation_level="AUTOCOMMIT") as db:
             db.execute(text(f'CREATE DATABASE "{name}"'))
@@ -57,12 +62,19 @@ def main():
                 check=True,
                 timeout=120,
             )
-            with target.connect() as db:
+            with Session(target) as db:
                 after = (
                     db.scalar(text("SELECT count(*) FROM users")),
                     db.scalar(text("SELECT count(*) FROM jobs")),
                 )
+                media = audit_restored_media(db)
+                restored_results = set(db.scalars(select(Job.id).where(Job.status == "SUCCEEDED")))
+            checked_at = now()
+            assert all(
+                job_id in restored_results for job_id, expiry in completed if expiry > checked_at
+            ), "A completed job became unavailable before its expiry during restore"
             assert before == after, "Restored account/job counts differ from the dump snapshot"
+            assert media["jobs_checked"] == after[1] and media["unexpired_inconsistent_jobs"] == 0
             print(
                 json.dumps(
                     {
@@ -71,6 +83,7 @@ def main():
                         "status": "SUCCEEDED",
                         "elapsed_seconds": round(time.monotonic() - started, 3),
                         "restore": json.loads(result.stdout),
+                        "media_audit": media,
                     }
                 )
             )

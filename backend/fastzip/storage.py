@@ -42,14 +42,16 @@ class Storage:
     def delete(self, key: str):
         self.client.delete_object(Bucket=self.bucket, Key=key)
 
-    def exists(self, key: str) -> bool:
+    def size_bytes(self, key: str) -> int | None:
         try:
-            self.client.head_object(Bucket=self.bucket, Key=key)
-            return True
+            return self.client.head_object(Bucket=self.bucket, Key=key)["ContentLength"]
         except ClientError as exc:
             if str(exc.response["Error"]["Code"]) in {"404", "NoSuchKey", "NotFound"}:
-                return False
+                return None
             raise
+
+    def exists(self, key: str) -> bool:
+        return self.size_bytes(key) is not None
 
     def objects(self, prefix=""):
         for page in self.client.get_paginator("list_objects_v2").paginate(

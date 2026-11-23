@@ -1,0 +1,225 @@
+{
+  "scope": "Local VM power loss with a surviving gateway and object store. Times are UTC. All accounts and objects were generated for this drill.",
+  "bucket_restore": {
+    "environment": "isolated local arm64 VMs, PostgreSQL 17 and private MinIO",
+    "working_tree_base": "5224fb35c8fdc9f95ee35bd48e6f948f315b8736",
+    "base_images": "e9437ef8e33fdb47a9e93ce08efd2a1742d908ee",
+    "backup": {
+      "started_utc": "2026-11-23T04:29:38.218Z",
+      "completed_utc": "2026-11-23T04:29:39.294Z",
+      "object_key": "hourly/2026-11-23T04-29-39.dump.age",
+      "bytes": 16092,
+      "sha256": "b487b84ae81d71b9d1dd950859515a744d4277fa637f3d48047305efd5cf24b1"
+    },
+    "loss": {
+      "latest_recovered_job_commit_utc": "2026-11-23T04:29:37.968Z",
+      "post_snapshot_job_commits_utc": [
+        "2026-11-23T04:29:44.370Z",
+        "2026-11-23T04:29:56.797Z",
+        "2026-11-23T04:30:11.298Z"
+      ],
+      "fault_estimate_on_source_db_clock_utc": "2026-11-23T04:30:11.573Z",
+      "source_clock_uncertainty_seconds": 0.042,
+      "snapshot_age_bounds_seconds": [
+        32.228,
+        33.304
+      ],
+      "observed_business_rpo_seconds": 33.606
+    },
+    "incident_requested_utc": "2026-11-23T04:30:11.522Z",
+    "timings_seconds": {
+      "outage_confirmed_and_recovery_started": 69.176,
+      "new_vm_booted": 86.137,
+      "engine_images_and_source_ready": 103.113,
+      "new_database_ready": 104.288,
+      "restore_migrate_reconcile_complete": 105.29,
+      "same_https_endpoint_ready": 107.405,
+      "first_new_upload_202": 107.439,
+      "new_compression_and_signed_download_200": 109.969
+    },
+    "source_pg_system_id": "7711218836888866860",
+    "pre_fault_business_counts": {
+      "in_snapshot": 4,
+      "confirmed_after_snapshot": 3,
+      "source_total": 7
+    },
+    "gateway_static_http_during_outage": 200,
+    "outage_signal": "client read timed out",
+    "timing_note": "The first readiness probe timed out after 12 seconds; the operator confirmed the gateway was reachable and resumed the drill from the original fault timestamp.",
+    "target_pg_system_id": "7711219995275231277",
+    "empty_target_table_count": 0,
+    "restore_cli": {
+      "restored_jobs": 4,
+      "marked_expired": 3,
+      "restore_seconds": 0.135
+    },
+    "restored_media_audit_before_new_writes": {
+      "jobs_checked": 4,
+      "expired_jobs": 3,
+      "unexpired_inconsistent_jobs": 0,
+      "originals": {
+        "matched": 3,
+        "missing": 1,
+        "size_mismatch": 0,
+        "unreferenced": 0
+      },
+      "outputs": {
+        "matched": 3,
+        "missing": 1,
+        "size_mismatch": 0,
+        "unreferenced": 0
+      }
+    },
+    "restored_counts": {
+      "users": 1,
+      "jobs": 4,
+      "tables": 8,
+      "missing_confirmed_post_snapshot_jobs": 3
+    },
+    "post_cutover_smoke": {
+      "session": "pre-incident cookie and CSRF token",
+      "job_status": "SUCCEEDED",
+      "format": "WEBP",
+      "result_bytes": 942,
+      "signed_get_http": 200
+    },
+    "retained_downloads_pre_and_post": {
+      "original": {
+        "bytes": 2790,
+        "sha256": "d3422c6de9df5e8523b4f06609936dc8f8226550e3d4a782a88d67676f0b6c36",
+        "format": "PNG",
+        "http": 200
+      },
+      "result": {
+        "bytes": 944,
+        "sha256": "c7a6fb227445b4c89cafa3ea7676a5d166b6739b07a38186e5c8bbd8229491d3",
+        "format": "WEBP",
+        "http": 200
+      }
+    },
+    "pre_snapshot_job_outcomes": {
+      "missing_original": "EXPIRED",
+      "missing_result": "EXPIRED",
+      "expired_present": "EXPIRED",
+      "retained": "SUCCEEDED"
+    },
+    "expired_downloads_http": 410,
+    "missing_post_snapshot_jobs_http": 404
+  },
+  "downloaded_archive_restore": {
+    "incident_requested_utc": "2026-11-23T04:35:07.830Z",
+    "source": "previously downloaded encrypted archive",
+    "archive_sha256": "b487b84ae81d71b9d1dd950859515a744d4277fa637f3d48047305efd5cf24b1",
+    "source_pg_system_id": "7711219995275231277",
+    "target_pg_system_id": "7711220979879792684",
+    "empty_target_table_count": 0,
+    "outage_signal": "client read timed out",
+    "timings_seconds": {
+      "outage_confirmed_and_recovery_started": 1.59,
+      "new_vm_booted": 18.386,
+      "new_database_ready": 37.18,
+      "restore_migrate_reconcile_audit_complete": 39.466,
+      "same_https_endpoint_ready": 40.898,
+      "first_new_upload_202": 40.929,
+      "new_compression_and_signed_download_200": 43.31
+    },
+    "guard_probe_http": {
+      "existing": 200,
+      "missing": 404,
+      "backup": 403,
+      "post": 403
+    },
+    "restore_cli": {
+      "restored_jobs": 4,
+      "marked_expired": 3,
+      "restore_seconds": 0.232
+    },
+    "media_audit": {
+      "jobs_checked": 4,
+      "expired_jobs": 3,
+      "unexpired_inconsistent_jobs": 0,
+      "originals": {
+        "matched": 3,
+        "missing": 1,
+        "size_mismatch": 0,
+        "unreferenced": 0
+      },
+      "outputs": {
+        "matched": 3,
+        "missing": 1,
+        "size_mismatch": 0,
+        "unreferenced": 0
+      }
+    },
+    "jobs_before_second_outage": 6,
+    "jobs_restored": 4,
+    "confirmed_newer_rows_absent": 2,
+    "restored_session_http": 200,
+    "retained_sha256_matches": [
+      "original",
+      "result"
+    ],
+    "expired_downloads_http": 410,
+    "missing_newer_jobs_http": 404,
+    "post_cutover_smoke": {
+      "upload_http": 202,
+      "status": "SUCCEEDED",
+      "signed_get_http": 200,
+      "result_format": "WEBP",
+      "result_bytes": 944
+    }
+  },
+  "downloaded_archive_bucket_and_object_head_recheck": {
+    "bucket_head_http": 200,
+    "restore": {
+      "restored_jobs": 4,
+      "marked_expired": 3,
+      "restore_seconds": 0.167
+    },
+    "media_audit": {
+      "jobs_checked": 4,
+      "expired_jobs": 3,
+      "unexpired_inconsistent_jobs": 0,
+      "originals": {
+        "matched": 3,
+        "missing": 1,
+        "size_mismatch": 0,
+        "unreferenced": 0
+      },
+      "outputs": {
+        "matched": 3,
+        "missing": 1,
+        "size_mismatch": 0,
+        "unreferenced": 0
+      }
+    }
+  },
+  "disposable_recovery_smoke": {
+    "users": 1,
+    "jobs": 5,
+    "status": "SUCCEEDED",
+    "elapsed_seconds": 0.957,
+    "restore": {
+      "restored_jobs": 5,
+      "marked_expired": 0,
+      "restore_seconds": 0.116
+    },
+    "media_audit": {
+      "jobs_checked": 5,
+      "expired_jobs": 3,
+      "unexpired_inconsistent_jobs": 0,
+      "originals": {
+        "matched": 4,
+        "missing": 1,
+        "size_mismatch": 0,
+        "unreferenced": 0
+      },
+      "outputs": {
+        "matched": 4,
+        "missing": 1,
+        "size_mismatch": 0,
+        "unreferenced": 0
+      }
+    }
+  }
+}

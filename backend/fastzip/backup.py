@@ -13,7 +13,7 @@ from sqlalchemy.engine import make_url
 
 from fastzip.config import settings
 from fastzip.db import record_error, session_factory
-from fastzip.models import BackupRun, now
+from fastzip.models import BackupRun, Job, now
 from fastzip.storage import Storage
 
 
@@ -42,6 +42,45 @@ def prune(store: Storage, prefix: str, keep: int):
     entries = sorted(store.objects(prefix), key=lambda obj: obj["Key"], reverse=True)
     for obj in entries[keep:]:
         store.delete(obj["Key"])
+
+
+def audit_restored_media(db):
+    """Compare every recorded key and byte count with HEAD, including expired jobs."""
+    store = Storage()
+    store.client.head_bucket(Bucket=store.bucket)
+
+    def compare(key, expected):
+        if key is None:
+            return "unreferenced"
+        size = store.size_bytes(key)
+        if size is None:
+            return "missing"
+        return "matched" if size == expected else "size_mismatch"
+
+    categories = ("matched", "missing", "size_mismatch", "unreferenced")
+    originals = dict.fromkeys(categories, 0)
+    outputs = dict.fromkeys(categories, 0)
+    checked = expired = inconsistent = 0
+    stamp = now()
+    for job in db.scalars(select(Job).execution_options(yield_per=250)):
+        original = compare(job.original_key, job.original_size)
+        output = compare(job.output_key, job.output_size)
+        originals[original] += 1
+        outputs[output] += 1
+        checked += 1
+        if job.status == "EXPIRED" or job.expires_at <= stamp:
+            expired += 1
+        elif original != "matched" or (
+            (job.output_key is not None or job.status == "SUCCEEDED") and output != "matched"
+        ):
+            inconsistent += 1
+    return {
+        "jobs_checked": checked,
+        "expired_jobs": expired,
+        "unexpired_inconsistent_jobs": inconsistent,
+        "originals": originals,
+        "outputs": outputs,
+    }
 
 
 def backup_once():

@@ -22,13 +22,13 @@ The daemon runs immediately and then hourly; a manual backup is optional. The ba
 
 ## Restore into a new database
 
-Run restore on a trusted recovery machine with the age identity and access to both private buckets. Stop application writers during a production cutover, restore into a fresh database, verify counts/records, then point the application at that database. Never overwrite the only existing database. The CLI rejects targets with existing tables.
+Run restore on a trusted recovery machine with the matching age identity, an empty PostgreSQL database and read access to the media bucket. Restoring by object key also requires read access to the backup bucket. During an actual cutover, stop application writers before switching databases. The CLI rejects a target with existing tables.
 
 ```sh
 fastzip restore \
   --object-key hourly/UTC_TIMESTAMP.dump.age \
   --identity /secure/offline/fastzip.agekey \
-  --target-database-url postgresql+psycopg://USER:PASSWORD@FRESH_HOST:5432/fastzip_restored
+  --target-database-url postgresql+psycopg://USER@FRESH_HOST:5432/fastzip_restored
 ```
 
 Provide source backup credentials, media credentials, endpoints and bucket names via environment / secret files. `DATABASE_URL` refers to the ordinary application configuration, while `--target-database-url` is the new destination. Run the command in a trusted session so command history/process visibility is controlled; prefer a target URL without a password and use `PGPASSWORD` when available. The CLI passes database passwords to subprocesses through environment, not process arguments. It decrypts, restores with owner/ACL rewriting disabled, applies newer additive migrations, and reconciles jobs against current media objects. Missing originals or outputs and elapsed expiry deadlines cause jobs to become `EXPIRED`. Files still present for expired records are removed on the next cleanup sweep.
@@ -36,6 +36,18 @@ Provide source backup credentials, media credentials, endpoints and bucket names
 Record backup creation time, bytes, source/restored user and job counts, restore duration, and the newest recovered application timestamp. Write a known record after backup to measure the actual lost-data window. Successful hourly scheduling targets RPO ≤1 hour; this is a target, not an established production guarantee. Rehearse recovery regularly, including restoring onto another machine after manager loss. Keep offline identity copies secure and test that they can decrypt a backup.
 
 Local validation during implementation restored 3 job records and 4 user records from a 16,755-byte encrypted backup into an empty database. The CLI restore step took approximately 0.35 seconds on that tiny fixture. It does not predict production restore duration.
+
+### Check a downloaded archive against its media bucket
+
+On the operator's trusted machine, mount the encrypted file and the offline identity read-only. Set `RESTORE_DB_URL` to an empty, isolated PostgreSQL 17 database, supply its password through `PGPASSWORD`, and configure `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET` and read-only media credentials. The media key needs permission to read objects and distinguish a missing key (HTTP 404) from denied access (HTTP 403). Keep the API, workers and cleanup service stopped while checking a production bucket.
+
+```sh
+fastzip restore --archive-file "$ENCRYPTED_ARCHIVE" --identity "$OFFLINE_IDENTITY" \
+  --target-database-url "$RESTORE_DB_URL"
+fastzip audit-restored-media --database-url "$RESTORE_DB_URL"
+```
+
+Record both JSON reports. The restore reports how many rows reconciliation marked expired. The audit verifies bucket access, then checks the original and output of every row with an S3 `HEAD`, including rows already expired. For each kind it counts keys with matching byte length, missing objects, size mismatches and rows without a reference. Pending jobs can legitimately lack an output. An inconsistent unexpired row causes exit 1. A missing bucket, denied access or a transport error aborts the audit. Expired rows appear in the totals even when the exit code is zero. Byte identity requires a trusted digest or a before-and-after download. Use a separate media bucket for any new test uploads following a production-archive replay.
 
 ## Production encrypted-backup validation (November 20, 2026)
 
@@ -92,4 +104,34 @@ docker rm -f -v fastzip-restore-test
 | Production database | Not overwritten, restarted, or modified by the restore drill |
 
 This establishes successful **age decryption and PostgreSQL archive recovery** for the newly encrypted production backup. It does **not** measure a production RPO/RTO, test application cutover, or demonstrate the media-object reconciliation and migration behavior of the full `fastzip restore` CLI on that real production object. Preserve the correctly paired offline identity, and perform future recovery rehearsals with an empty destination database. Historical backups encrypted to the old recipient must not be described as recoverable without the matching private identity.
+
+The two production rows still need the [downloaded-archive check](#check-a-downloaded-archive-against-its-media-bucket) on a machine with the matching identity and read-only Spaces access. Record the audit time because the media retention window is 24 hours. A replay today can establish which objects still exist. Measuring a historical outage also requires its start time, a record of acknowledged writes around the backup, and the time the application accepted its first new job.
+
+## Timed recovery on fresh VMs
+
+On November 22, 2026 (Toronto), we forcibly stopped the VM running the API, worker and PostgreSQL. For each of two trials we created a new Ubuntu 24.04.5 arm64 VM after the fault, installed Docker 29.1.3, and initialized PostgreSQL 17.12 on a fresh ext4 filesystem. Each target started with zero public tables and a different PostgreSQL system identifier. A separate VM kept the private MinIO buckets and the Caddy HTTPS address available. The OS image, packages and container layers were cached locally. These timings include local VM creation and gateway cutover. Cloud provisioning, DNS changes and Swarm manager reconstruction are outside the drill.
+
+| Elapsed from forced power-off request | Private backup bucket | Downloaded copy of the same archive |
+| --- | ---: | ---: |
+| Outage confirmed and recovery started | 69.176 s | 1.590 s |
+| New VM booted | 86.137 s | 18.386 s |
+| Empty PostgreSQL ready | 104.288 s | 37.180 s |
+| Original HTTPS address ready | 107.405 s | 40.898 s |
+| **Existing session received HTTP 202 for a new upload (RTO)** | **107.439 s** | **40.929 s** |
+| Worker succeeded and client downloaded and decoded the signed WebP (HTTP 200) | 109.969 s | 43.310 s |
+
+Both trials used one monotonic clock from the power-off request to the client response. In the first trial the readiness probe timed out while the gateway still served its static page. The clock continued through diagnosis. The second trial used a bounded probe and replayed the saved archive with the same SHA-256 digest. Its restore and audit could only send `HEAD` to the media bucket. The endpoint returned 200 for an existing key, 404 for a missing key and 403 for both a backup-bucket lookup and a media `POST`.
+
+**Data loss in the first trial.** Four completed jobs were in the snapshot. Three more completed before power-off. We recorded their IDs and source-side PostgreSQL commit timestamps before the fault with `track_commit_timestamp=on`. The latest recovered job committed at 04:29:37.968 UTC and the fault was estimated at 04:30:11.573 UTC on the source database clock. The observed job recovery point was **33.606 seconds** before failure, with ±0.042 s clock uncertainty. The dump's snapshot was 32.228–33.304 s old. The target restored one user, the four expected job IDs and eight tables. All three later job lookups returned 404. In the second trial the same snapshot restored four of six jobs on the previous replacement. The two acknowledged jobs written there after the snapshot were absent. The hourly backup schedule remains a separate recovery target.
+
+| Restored fixture | Object storage and download result in both trials |
+| --- | --- |
+| Retained job | Original PNG (2,790 bytes) and output WebP (944 bytes) both downloaded. Each SHA-256 matched its own pre-fault download. |
+| Deleted original | Original missing, output still present. Reconciliation marked the job `EXPIRED`. |
+| Deleted output | Original still present, output missing. Reconciliation marked the job `EXPIRED`. |
+| Elapsed retention | Both objects still present at audit time. The shortened fixture deadline had passed and the job was `EXPIRED`. |
+
+Both download routes returned 410 for all three expired jobs. The audit found three matching originals and three matching outputs out of four jobs, one missing object of each kind, and zero inconsistent unexpired jobs. A new upload from the pre-fault session produced a 942-byte WebP in the first trial and a 944-byte WebP in the second. The following [measurement record](evidence/disaster-recovery-2026-11-22.json) contains UTC timestamps, object digest, row counts and HTTP outcomes for both trials.
+
+To repeat the measurement, use a private test bucket and an independent object-storage node. Create and finish identifiable jobs on both sides of a backup, and record the IDs and source commit timestamps outside the failure domain. Capture a healthy original and result digest. In the test bucket, delete an original and an output belonging to different backed-up jobs and let a third fixture expire. Start the outage clock, power off the source VM, provision the empty target and run the restore and audit above. Point the same HTTPS address at the target, upload using the existing session and fetch the new signed result. Compare the restored IDs, hashes and HTTP responses against the pre-fault record.
 

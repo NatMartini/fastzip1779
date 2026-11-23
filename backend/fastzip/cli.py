@@ -11,8 +11,9 @@ from alembic.config import Config
 from pydantic import TypeAdapter
 from pydantic.networks import EmailStr
 from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy.orm import Session
 
-from fastzip.backup import backup_once, postgres_arguments
+from fastzip.backup import audit_restored_media, backup_once, postgres_arguments
 from fastzip.cleanup import cleanup_once, reconcile
 from fastzip.config import settings
 from fastzip.db import session_factory
@@ -31,8 +32,12 @@ def main():
     sub.add_parser("backup")
     sub.add_parser("cleanup")
     sub.add_parser("reconcile")
+    audit = sub.add_parser("audit-restored-media", help="Read restored rows and media metadata")
+    audit.add_argument("--database-url", required=True, help="Restored database to inspect")
     restore = sub.add_parser("restore")
-    restore.add_argument("--object-key", required=True)
+    source = restore.add_mutually_exclusive_group(required=True)
+    source.add_argument("--object-key", help="Object in the private backup bucket")
+    source.add_argument("--archive-file", type=Path, help="Previously downloaded encrypted backup")
     restore.add_argument("--identity", required=True, help="Offline age private-key file")
     restore.add_argument("--target-database-url", required=True, help="A fresh, empty database")
     args = parser.parse_args()
@@ -69,14 +74,27 @@ def main():
         cleanup_once()
     elif args.command == "reconcile":
         print(f"Marked {reconcile()} jobs expired")
+    elif args.command == "audit-restored-media":
+        target = create_engine(args.database_url)
+        try:
+            with Session(target) as db:
+                report = audit_restored_media(db)
+        finally:
+            target.dispose()
+        print(json.dumps(report))
+        if report["unexpired_inconsistent_jobs"]:
+            raise SystemExit(1)
     elif args.command == "restore":
         target = create_engine(args.target_database_url)
         if inspect(target).get_table_names():
             parser.error("Restore target must be empty; existing databases are never overwritten")
         started = time.monotonic()
         with TemporaryDirectory(prefix="fastzip-restore-") as directory:
-            encrypted, dump = Path(directory) / "backup.age", Path(directory) / "backup.dump"
-            Storage(backup=True).get(args.object_key, encrypted)
+            dump = Path(directory) / "backup.dump"
+            encrypted = args.archive_file
+            if encrypted is None:
+                encrypted = Path(directory) / "backup.age"
+                Storage(backup=True).get(args.object_key, encrypted)
             subprocess.run(
                 [
                     settings().age_bin,
