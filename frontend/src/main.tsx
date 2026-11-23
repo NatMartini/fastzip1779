@@ -381,6 +381,7 @@ type ErrorEvent = {
   message: string;
   created_at: string;
 };
+type ErrorLogPage = { items: ErrorEvent[]; has_more: boolean };
 type Metrics = {
   configured: boolean;
   droplets: {
@@ -394,31 +395,46 @@ type Metrics = {
 
 const overviewRefreshSeconds = 10;
 const metricsRefreshSeconds = 60;
+const errorPageSize = 50;
 
 function Admin() {
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [events, setEvents] = useState<ErrorEvent[]>([]);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [metricsError, setMetricsError] = useState(false);
-  const [service, setService] = useState("");
-  const [since, setSince] = useState("");
-  const [until, setUntil] = useState("");
-  const [offset, setOffset] = useState(0);
+  const [logQuery, setLogQuery] = useState({
+    service: "",
+    since: "",
+    until: "",
+    offset: 0,
+  });
+  const [loadedPage, setLoadedPage] = useState<{
+    query: typeof logQuery;
+    page: ErrorLogPage;
+  } | null>(null);
   const [error, setError] = useState("");
+  const page = loadedPage?.query === logQuery ? loadedPage.page : null;
+  function setLogFilter(field: "service" | "since" | "until", value: string) {
+    setLogQuery({ ...logQuery, [field]: value, offset: 0 });
+  }
   useEffect(() => {
     let mounted = true;
     const load = async () => {
-      const query = new URLSearchParams({ service, offset: String(offset) });
-      if (since) query.set("since", new Date(since).toISOString());
-      if (until) query.set("until", new Date(until).toISOString());
       try {
+        const { service, offset, since, until } = logQuery;
+        const query = new URLSearchParams({
+          service,
+          offset: String(offset),
+          limit: String(errorPageSize),
+        });
+        if (since) query.set("since", new Date(since).toISOString());
+        if (until) query.set("until", new Date(until).toISOString());
         const [summary, errors] = await Promise.all([
           api<Overview>("/admin/overview"),
-          api<{ items: ErrorEvent[] }>("/admin/errors?" + query),
+          api<ErrorLogPage>("/admin/errors?" + query),
         ]);
         if (mounted) {
           setOverview(summary);
-          setEvents(errors.items);
+          setLoadedPage({ query: logQuery, page: errors });
           setError("");
         }
       } catch (error) {
@@ -431,7 +447,7 @@ function Admin() {
       mounted = false;
       clearInterval(timer);
     };
-  }, [service, since, until, offset]);
+  }, [logQuery]);
   useEffect(() => {
     let mounted = true;
     const load = () =>
@@ -608,11 +624,8 @@ function Admin() {
               <label>
                 Service
                 <select
-                  value={service}
-                  onChange={(e) => {
-                    setService(e.target.value);
-                    setOffset(0);
-                  }}
+                  value={logQuery.service}
+                  onChange={(e) => setLogFilter("service", e.target.value)}
                 >
                   <option value="">All services</option>
                   {["api", "worker", "cleanup", "backup", "monitoring"].map(
@@ -626,22 +639,16 @@ function Admin() {
                 From
                 <input
                   type="datetime-local"
-                  value={since}
-                  onChange={(e) => {
-                    setSince(e.target.value);
-                    setOffset(0);
-                  }}
+                  value={logQuery.since}
+                  onChange={(e) => setLogFilter("since", e.target.value)}
                 />
               </label>
               <label>
                 Until
                 <input
                   type="datetime-local"
-                  value={until}
-                  onChange={(e) => {
-                    setUntil(e.target.value);
-                    setOffset(0);
-                  }}
+                  value={logQuery.until}
+                  onChange={(e) => setLogFilter("until", e.target.value)}
                 />
               </label>
             </div>
@@ -656,7 +663,7 @@ function Admin() {
                   </tr>
                 </thead>
                 <tbody>
-                  {events.map((event) => (
+                  {page?.items.map((event) => (
                     <tr key={event.id}>
                       <td>{date(event.created_at)}</td>
                       <td>
@@ -672,20 +679,35 @@ function Admin() {
                 </tbody>
               </table>
             </div>
-            {events.length === 0 && (
+            {!page && !error && (
+              <p className="empty-small" role="status">
+                Loading error log…
+              </p>
+            )}
+            {page?.items.length === 0 && (
               <p className="empty-small">No errors in this view.</p>
             )}
             <div className="pagination">
               <button
-                disabled={!offset}
-                onClick={() => setOffset(Math.max(0, offset - 50))}
+                disabled={!logQuery.offset}
+                onClick={() =>
+                  setLogQuery({
+                    ...logQuery,
+                    offset: logQuery.offset - errorPageSize,
+                  })
+                }
               >
                 <ChevronLeft size={16} />
                 Previous
               </button>
               <button
-                disabled={events.length < 50}
-                onClick={() => setOffset(offset + 50)}
+                disabled={!page?.has_more}
+                onClick={() =>
+                  setLogQuery({
+                    ...logQuery,
+                    offset: logQuery.offset + errorPageSize,
+                  })
+                }
               >
                 Next
                 <ChevronRight size={16} />

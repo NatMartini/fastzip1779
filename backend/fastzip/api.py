@@ -423,7 +423,11 @@ def errors(
         query = query.where(ErrorEvent.created_at >= since)
     if until:
         query = query.where(ErrorEvent.created_at <= until)
-    items = db.scalars(query.order_by(ErrorEvent.created_at.desc()).offset(offset).limit(limit))
+    items = db.scalars(
+        query.order_by(ErrorEvent.created_at.desc(), ErrorEvent.id.desc())
+        .offset(offset)
+        .limit(limit + 1)
+    ).all()
     return {
         "items": [
             {
@@ -434,8 +438,9 @@ def errors(
                 "message": event.message,
                 "created_at": event.created_at,
             }
-            for event in items
-        ]
+            for event in items[:limit]
+        ],
+        "has_more": len(items) > limit,
     }
 
 

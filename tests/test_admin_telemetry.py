@@ -91,7 +91,7 @@ def test_empty_overview_has_safe_defaults(admin_client):
 def test_empty_error_log_returns_empty_items(admin_client):
     response = admin_client.get("/api/admin/errors")
     assert response.status_code == 200
-    assert response.json() == {"items": []}
+    assert response.json() == {"items": [], "has_more": False}
 
 
 @pytest.mark.parametrize(
@@ -281,15 +281,30 @@ def test_error_filters_are_inclusive_and_ordered(
     ]
 
 
-def test_error_pagination_has_no_duplicates_or_missing_rows(admin_client, error_records):
-    ids = []
-    for offset in (0, 2, 4, 6):
-        response = admin_client.get("/api/admin/errors", params={"offset": offset, "limit": 2})
+def test_error_pagination_has_no_duplicates_or_missing_rows(admin_client, frozen_now):
+    with session_factory()() as db, db.begin():
+        events = [
+            ErrorEvent(service="worker", node="node", message=str(i), created_at=frozen_now)
+            for i in range(50)
+        ]
+        extra = ErrorEvent(service="api", node="node", message="extra", created_at=frozen_now)
+        db.add_all([*events, extra])
+        db.flush()
+        worker_ids = sorted((event.id for event in events), reverse=True)
+        all_ids = sorted([*worker_ids, extra.id], reverse=True)
+
+    for filters, expected, has_more in (
+        ({"service": "worker"}, worker_ids, False),
+        ({}, all_ids[:50], True),
+        ({"offset": 50}, all_ids[50:], False),
+        ({"service": "worker", "offset": 50}, [], False),
+        ({"offset": 2, "limit": 2}, all_ids[2:4], True),
+    ):
+        response = admin_client.get("/api/admin/errors", params=filters)
         assert response.status_code == 200
-        items = response.json()["items"]
-        assert len(items) == {0: 2, 2: 2, 4: 1, 6: 0}[offset]
-        ids.extend(event["id"] for event in items)
-    assert ids == [error_records[name] for name in ("new", "upper", "middle", "lower", "old")]
+        page = response.json()
+        assert [event["id"] for event in page["items"]] == expected
+        assert page["has_more"] is has_more
 
 
 @pytest.mark.parametrize("field", ["since", "until"])
