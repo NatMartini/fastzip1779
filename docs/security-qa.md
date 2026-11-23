@@ -48,12 +48,36 @@ combined with object deletion failure. The last case intentionally retains a
 Moto orphan; background orphan cleanup is outside this suite. Telemetry tests
 freeze the API clock to check exact boundaries without sleeps.
 
+## Interrupted media commits
+
+The API and worker hold a PostgreSQL transaction lock for each object key from
+the start of its upload through publication of its database reference. After
+a disconnect, cleanup opens a fresh transaction and checks both file references
+before deleting an object. If the writer still holds the lock or the database
+is unavailable, the file stays in storage for a later orphan sweep.
+
+The 12 regression cases cover lost acknowledgements, real rollbacks, unavailable
+verification, a sweep overlapping either kind of upload, competing workers and
+repeated finalization of the same attempt. Run them against the disposable
+`TEST_DATABASE_URL` with `uv run --extra dev pytest -q tests/test_media_commit_recovery.py`.
+[Regression tests](../tests/test_media_commit_recovery.py)
+
+In a separate local run with PostgreSQL 17.12, MinIO and the HTTP API, we closed
+the publishing connection immediately after PostgreSQL committed. The upload
+returned HTTP 202 with one job. Its original signed download returned the exact
+2,790 input bytes. The worker completed in one attempt despite a second lost
+acknowledgement, and the signed result returned HTTP 200 with a decodable
+940-byte WebP. Closing the connection before commit produced HTTP 503 on upload
+and a successful retry for the worker. Both rolled-back objects were removed.
+The full suite passed on the isolated PostgreSQL 17.12 server with 218 tests in
+26.28 seconds, including the 12 commit recovery cases.
+
 ## Additional boundary suites
 
 Five additional suites cover media/API admission limits, rate windows and
 concurrent increments, CLI administrator provisioning, and password/hash edges.
-Their **96 cases** bring the complete suite to **203 tests**, while the four
-focused security suites documented above remain an 87-case subset.
+Their **96 cases** brought the complete suite to **203 tests** at that milestone.
+The original four focused security suites comprise an 87-case subset.
 
 See [Boundary and Failure-Case Regression Tests](../README.md#boundary-and-failure-case-regression-tests)
 for the per-file case counts, exact scenarios, commands, recorded local results,
@@ -149,12 +173,10 @@ that a suite has passed.
 | Filename handling | Path removal, control characters, length truncation, and empty sanitized names |
 | Admin APIs | Multi-page admin job ordering; configured DigitalOcean metrics parsing and upstream failure handling |
 | API failure handling | Readiness dependency failures, response security headers, and failure to persist an error event |
-| Transactional object cleanup | Ambiguous database commit outcomes when an original/result object already exists; the boundary suites do not resolve this separately identified reliability issue |
 
-Suggested next order: transactional object cleanup, filename handling, configured
-monitoring failures, then real deployment fault injection. See [validation.md](validation.md) for broader runtime
-evidence; these focused suites do not prove real-browser, TLS-ingress, provider
-storage, worker, backup, or production behavior.
+Remaining priorities include filename handling, configured monitoring failures
+and deployment fault injection. The deployment results are recorded in the
+[validation record](validation.md).
 
 ## CI integration
 

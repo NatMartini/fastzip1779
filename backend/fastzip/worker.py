@@ -14,6 +14,7 @@ from tempfile import TemporaryDirectory
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
+from fastzip.cleanup import discard_unreferenced_media, lock_media_key
 from fastzip.config import settings
 from fastzip.db import node_name, record_error, session_factory
 from fastzip.media import validate
@@ -108,8 +109,24 @@ def heartbeat(worker_id=WORKER_ID, job: Job | None = None) -> bool:
     return True
 
 
-def complete(job: Job, output_key: str, size: int, mime: str, duration: float) -> bool:
+def complete(
+    job: Job,
+    output_key: str,
+    size: int,
+    mime: str,
+    duration: float,
+    *,
+    output_file: Path | None = None,
+) -> bool:
     with session_factory()() as db, db.begin():
+        upload_started = time.monotonic()
+        lock_media_key(db, output_key)
+        if output_file is not None:
+            # A replay of the same attempt must never overwrite an already published key.
+            if db.scalar(select(Job.id).where(*ownership(job))) is None:
+                return False
+            storage().put(output_file, output_key, mime)
+            duration += time.monotonic() - upload_started
         return bool(
             db.execute(
                 update(Job)
@@ -203,9 +220,13 @@ def process(job: Job, worker_id=WORKER_ID):
             if lost_lease.is_set():
                 return
             output_key = f"outputs/{job.id}/{job.attempt_id}/{output.name}"
-            storage().put(output, output_key, mime)
             published = complete(
-                job, output_key, output.stat().st_size, mime, time.monotonic() - started
+                job,
+                output_key,
+                output.stat().st_size,
+                mime,
+                time.monotonic() - started,
+                output_file=output,
             )
     except Exception:
         fail(job)
@@ -214,9 +235,11 @@ def process(job: Job, worker_id=WORKER_ID):
         thread.join(timeout=settings().heartbeat_seconds + 2)
         if output_key and not published:
             try:
-                storage().delete(output_key)
+                discard_unreferenced_media(output_key)
             except Exception:
-                record_error("worker", "Could not delete an unclaimed output object", job.id)
+                record_error(
+                    "worker", "Could not verify or remove an unclaimed output object", job.id
+                )
 
 
 def run():

@@ -195,9 +195,9 @@ PostgreSQL setup, run commands, and recorded results.
 
 #### Boundary and Failure-Case Regression Tests
 
-The boundary suites added **96 cases** to the 107-test baseline. Three later
-restored-media audit tests brought the full suite to **206 tests**.
-Parameterized cases are counted individually.
+The boundary suites added **96 cases** to the 107-test baseline. Three restored-media
+audit tests and 12 media commit recovery tests brought the full suite to **218 tests**.
+Parameterized cases are counted individually. [Interrupted commit tests and results](docs/security-qa.md#interrupted-media-commits)
 
 | Suite | Cases | Coverage |
 | --- | ---: | --- |

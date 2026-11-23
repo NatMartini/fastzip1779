@@ -90,6 +90,18 @@ def account(client):
 
 
 @pytest.fixture
+def failure_client(client, account):
+    from fastzip.api import app
+
+    # Exercise the HTTP error handler instead of TestClient re-raising server errors.
+    with TestClient(app, raise_server_exceptions=False) as browser:
+        browser.cookies.update(client.cookies)
+        browser.headers.update(client.headers)
+        assert browser.get("/api/auth/me").json() == account
+        yield browser
+
+
+@pytest.fixture
 def image():
     file = io.BytesIO()
     Image.new("RGB", (400, 300), (87, 134, 58)).save(file, "PNG")

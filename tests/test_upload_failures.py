@@ -30,8 +30,6 @@ an orphan in Moto; this suite does not verify the background orphan sweep.
 import uuid
 
 import pytest
-from fastapi.testclient import TestClient
-from fastzip.api import app
 from fastzip.db import session_factory
 from fastzip.models import ErrorEvent, Job
 from sqlalchemy import select
@@ -39,16 +37,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DBSession
 
 from tests.conftest import upload
-
-
-@pytest.fixture
-def failure_client(client, account):
-    # Exercise the real 503 handler instead of TestClient re-raising server errors.
-    with TestClient(app, raise_server_exceptions=False) as browser:
-        browser.cookies.update(client.cookies)
-        browser.headers.update(client.headers)
-        assert browser.get("/api/auth/me").json() == account
-        yield browser
 
 
 @pytest.mark.parametrize(

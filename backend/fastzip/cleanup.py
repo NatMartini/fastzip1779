@@ -12,6 +12,32 @@ from fastzip.models import Heartbeat, Job, RateLimit, Session, now
 from fastzip.storage import storage
 
 
+def lock_media_key(db, key: str):
+    # Hold the same per-key lock as orphan deletion until the object reference commits.
+    db.execute(text("SELECT pg_advisory_xact_lock(779003, hashtext(:key))"), {"key": key})
+
+
+def discard_unreferenced_media(key: str) -> Job | None:
+    """Keep referenced or in-flight media and return the referencing job when visible."""
+    with session_factory().begin() as db:
+        # The reference query needs a snapshot taken after the publication lock was acquired.
+        db.connection(execution_options={"isolation_level": "READ COMMITTED"})
+        if not db.scalar(
+            text("SELECT pg_try_advisory_xact_lock(779003, hashtext(:key))"), {"key": key}
+        ):
+            return None  # Publication is still in flight. The orphan sweep can retry later.
+        owner = db.scalar(
+            select(Job)
+            .where(
+                Job.media_deleted_at.is_(None), (Job.original_key == key) | (Job.output_key == key)
+            )
+            .limit(1)
+        )
+        if owner is None:
+            storage().delete(key)
+        return owner
+
+
 def cleanup_once():
     with session_factory()() as db, db.begin():
         if not db.scalar(text("SELECT pg_try_advisory_xact_lock(779001)")):
@@ -42,7 +68,7 @@ def cleanup_once():
         )
         for obj in storage().objects():
             if obj["Key"] not in referenced and obj["LastModified"] < stamp - timedelta(hours=2):
-                storage().delete(obj["Key"])
+                discard_unreferenced_media(obj["Key"])
         db.execute(delete(Session).where(Session.expires_at <= stamp))
         # Every auth window is at most one hour; retain a full day for boundary safety.
         db.execute(delete(RateLimit).where(RateLimit.window < int(time.time()) - 86400))

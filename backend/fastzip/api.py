@@ -22,6 +22,7 @@ from sqlalchemy import case, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 
+from fastzip.cleanup import discard_unreferenced_media, lock_media_key
 from fastzip.config import settings
 from fastzip.db import database, record_error
 from fastzip.media import MAX_UPLOAD, InvalidMedia, validate
@@ -212,9 +213,10 @@ def upload(
         except InvalidMedia as exc:
             raise HTTPException(422, str(exc)) from exc
         # Serialize submissions per account, including across API replicas.
-        db.scalar(select(User).where(User.id == account.id).with_for_update())
+        account_id = account.id
+        db.scalar(select(User).where(User.id == account_id).with_for_update())
         active = db.scalar(
-            select(func.count()).select_from(Job).where(Job.user_id == account.id, active_jobs())
+            select(func.count()).select_from(Job).where(Job.user_id == account_id, active_jobs())
         )
         if active >= settings().max_active_jobs:
             raise HTTPException(409, "You already have three active jobs; wait for one to finish")
@@ -224,7 +226,7 @@ def upload(
         filename = re.sub(r"[\x00-\x1f\x7f]", "", filename)[:160] or "upload"
         job = Job(
             id=identifier,
-            user_id=account.id,
+            user_id=account_id,
             filename=filename,
             media_type=media_type,
             preset=preset,
@@ -233,15 +235,23 @@ def upload(
             expires_at=now() + timedelta(hours=settings().media_hours),
         )
         try:
+            lock_media_key(db, key)
             storage().put(path, key, mime)
             db.add(job)
             db.commit()
         except Exception:
             db.rollback()
             try:
-                storage().delete(key)
+                saved = discard_unreferenced_media(key)
             except Exception:
-                pass  # The orphan sweep handles interrupted or unsuccessful uploads.
+                saved = None  # Verification or cleanup can resume in the orphan sweep.
+            if (
+                saved is not None
+                and saved.id == identifier
+                and saved.user_id == account_id
+                and saved.original_key == key
+            ):
+                return job_json(saved)
             raise
     return job_json(job)
 
