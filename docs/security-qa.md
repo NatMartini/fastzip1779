@@ -83,6 +83,20 @@ See [Boundary and Failure-Case Regression Tests](../README.md#boundary-and-failu
 for the per-file case counts, exact scenarios, commands, recorded local results,
 and the two minimal input-error handling corrections exposed by the tests.
 
+The filename suite submits multipart uploads, runs the compression worker, and
+checks the saved name in job history. For both the original and the result, it
+checks the API filename and the UTF-8 attachment name in the signed URL. Cases
+cover directory removal, control characters, Unicode and punctuation, the
+160-character limit, and the `upload` fallback. With a disposable
+`TEST_DATABASE_URL` and FFmpeg/FFprobe available, run
+`uv run --extra dev pytest -q tests/test_filename_handling.py`.
+A local run using PostgreSQL 16.2 and Moto S3 passed all 10 filename cases and
+all 232 tests in the full suite. [Filename regression tests](../tests/test_filename_handling.py)
+
+In a separate local browser check against MinIO, the history entry and original
+download both showed `旅行 + 100% #1.png`. The browser suggested
+`旅行 + 100% #1.webp` when downloading the compressed image.
+
 ## Run locally
 
 Run commands from the repository root in a macOS/Linux shell. Install Python 3.12+,
@@ -170,12 +184,11 @@ that a suite has passed.
 | Account/API input validation | Additional credential field-type combinations beyond the selected invalid/missing inputs |
 | Rate limiting | Registration IP isolation across independent HTTP clients and sustained traffic across separate API processes; window boundaries and atomic concurrent database counts are now covered |
 | Upload validation | Additional malformed metadata shapes and real near-limit video encoding under container resource limits; byte/pixel/duration/resolution admission boundaries and selected probe failures are now covered |
-| Filename handling | Path removal, control characters, length truncation, and empty sanitized names |
 | Admin APIs | Multi-page admin job ordering; configured DigitalOcean metrics parsing and upstream failure handling |
 | API failure handling | Readiness dependency failures, response security headers, and failure to persist an error event |
 
-Remaining priorities include filename handling, configured monitoring failures
-and deployment fault injection. The deployment results are recorded in the
+Remaining priorities include configured monitoring failures and deployment
+fault injection. The deployment results are recorded in the
 [validation record](validation.md).
 
 ## CI integration

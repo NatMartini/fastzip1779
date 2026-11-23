@@ -197,15 +197,17 @@ PostgreSQL setup, run commands, and recorded results.
 
 The boundary suites added **96 cases** to the 107-test baseline. Three restored-media
 audit tests and 12 media commit recovery tests brought the full suite to **218 tests**.
-Parameterized cases are counted individually. [Interrupted commit tests and results](docs/security-qa.md#interrupted-media-commits)
+Four administrator CLI cancellation cases and ten filename cases brought the current
+total to **232 tests**. Parameterized cases are counted individually. [Interrupted commit tests and results](docs/security-qa.md#interrupted-media-commits)
 
 | Suite | Cases | Coverage |
 | --- | ---: | --- |
 | [`test_media_boundaries.py`](tests/test_media_boundaries.py) | 47 | Image sizes just below/at/above 20 MiB; video sizes below/at/above 100 MiB; 25 MP image boundaries; 120-second duration and landscape/portrait 1080p boundaries; zero/multiple video streams; non-finite durations; FFprobe timeout, process failure, invalid JSON, null/missing/wrong-shaped fields; truncated JPEG; encoding timeout and retry without losing the original |
 | [`test_api_boundaries.py`](tests/test_api_boundaries.py) | 28 | Password lengths 11/12/128/129; missing/invalid credentials; case-normalized duplicate registration; malformed UUID, pagination and download kind; file-signature detection despite forged MIME/extension; FFprobe failures returning 422 without objects/jobs; missing download objects; equal-size original fallback |
 | [`test_rate_limit_boundaries.py`](tests/test_rate_limit_boundaries.py) | 6 | Last allowed attempt; rejection before the window ends; reset at the exact next window; `Retry-After`; eight concurrent database connections sharing one quota; registration reset; login limits across IPs and email case |
-| [`test_cli_admin_boundaries.py`](tests/test_cli_admin_boundaries.py) | 9 | CLI admin creation at 12/128-character password limits followed by real HTTP login/admin access; 11/129-character rejection; confirmation mismatch; invalid email; duplicate account rejection without granting an existing user admin rights |
+| [`test_cli_admin_boundaries.py`](tests/test_cli_admin_boundaries.py) | 13 | Creating an admin with a 12- or 128-character password permits HTTP login and admin access. Rejection cases cover lengths 11/129, mismatched confirmation, invalid email, duplicate accounts, and EOF or Ctrl+C at either password prompt. |
 | [`test_password_boundaries.py`](tests/test_password_boundaries.py) | 6 | Invalid login password lengths preserving the current session; safe rejection of damaged stored hashes; successful login upgrading an outdated Argon2 hash |
+| [`test_filename_handling.py`](tests/test_filename_handling.py) | 10 | Job history and signed download names after directory removal, control-character removal, truncation to 160 characters, or fallback to `upload`. Covers Unix and Windows paths, Unicode, punctuation, original files, and WebP/MP4 results. |
 
 Run the new suites from the repository root, using the same **disposable**
 `TEST_DATABASE_URL` as above (fixtures truncate its application tables):
@@ -214,7 +216,7 @@ Run the new suites from the repository root, using the same **disposable**
 uv run --extra dev pytest -q \
   tests/test_media_boundaries.py tests/test_api_boundaries.py \
   tests/test_rate_limit_boundaries.py tests/test_cli_admin_boundaries.py \
-  tests/test_password_boundaries.py
+  tests/test_password_boundaries.py tests/test_filename_handling.py
 
 # Run the complete regression suite, including the existing real FFmpeg test.
 uv run --extra dev pytest -q
