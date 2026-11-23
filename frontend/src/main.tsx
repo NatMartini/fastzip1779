@@ -392,6 +392,9 @@ type Metrics = {
   }[];
 };
 
+const overviewRefreshSeconds = 10;
+const metricsRefreshSeconds = 60;
+
 function Admin() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [events, setEvents] = useState<ErrorEvent[]>([]);
@@ -423,7 +426,7 @@ function Admin() {
       }
     };
     void load();
-    const timer = setInterval(load, 10000);
+    const timer = setInterval(load, overviewRefreshSeconds * 1000);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -443,7 +446,7 @@ function Admin() {
           if (mounted) setMetricsError(true);
         });
     void load();
-    const timer = setInterval(load, 60000);
+    const timer = setInterval(load, metricsRefreshSeconds * 1000);
     return () => {
       mounted = false;
       clearInterval(timer);
@@ -455,10 +458,10 @@ function Admin() {
         <div>
           <h1>Administration</h1>
           <p className="muted">
-            Service health and job metadata. User media stays private.
+            The job overview and error log refresh every{" "}
+            {overviewRefreshSeconds} seconds. User media stays private.
           </p>
         </div>
-        <span className="live-dot">Refreshes every 10s</span>
       </div>
       {error && <Notice text={error} clear={() => setError("")} />}
       {!overview ? (
@@ -507,8 +510,14 @@ function Admin() {
                     <div>
                       <strong>{worker.node}</strong>
                       <span>
-                        {worker.job_id ? "Processing a job" : "Ready for work"}{" "}
-                        · {date(worker.seen_at)}
+                        {worker.online &&
+                          (worker.job_id
+                            ? "Processing a job · "
+                            : "Ready for work · ")}
+                        Last heartbeat{" "}
+                        <time dateTime={worker.seen_at}>
+                          {date(worker.seen_at)}
+                        </time>
                       </span>
                     </div>
                     <span>{worker.online ? "Online" : "Offline"}</span>
@@ -546,7 +555,12 @@ function Admin() {
             </section>
           </div>
           <section className="panel">
-            <h2>Infrastructure</h2>
+            <div className="section-heading infrastructure-heading">
+              <h2>Infrastructure</h2>
+              <small className="muted">
+                Metrics refresh every {metricsRefreshSeconds} seconds
+              </small>
+            </div>
             {metricsError ? (
               <p className="muted">
                 Couldn’t refresh infrastructure metrics. Retrying automatically.

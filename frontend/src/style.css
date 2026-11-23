@@ -1078,19 +1078,9 @@ nav button:hover {
 .dot.online {
   background: #95b659;
 }
-.live-dot {
-  font-size: 12px;
-  color: #56664e;
-  display: flex;
-  gap: 7px;
-  align-items: center;
-}
-.live-dot:before {
-  content: "";
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #93ac6a;
+.infrastructure-heading {
+  flex-wrap: wrap;
+  margin-bottom: 18px;
 }
 .panel > p.muted {
   font-size: 13px;
@@ -1506,9 +1496,6 @@ td:first-child {
   }
   .text-button {
     font-size: 12px;
-  }
-  .live-dot {
-    display: none;
   }
   .admin-stats {
     gap: 10px;
