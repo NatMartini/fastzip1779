@@ -1,20 +1,19 @@
 """Exercise CLI-created admins through real database writes and HTTP login."""
 
 import sys
+from unittest.mock import Mock
 
 import pytest
 from fastzip import cli
 from fastzip.db import session_factory
 from fastzip.models import User
 from fastzip.security import hasher
-from pydantic import ValidationError
 from sqlalchemy import func, select
 
 
 def invoke_admin(monkeypatch, email, passwords):
-    answers = iter(passwords)
     monkeypatch.setattr(sys, "argv", ["fastzip", "create-admin", email])
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _: next(answers))
+    monkeypatch.setattr(cli.getpass, "getpass", Mock(side_effect=passwords))
     cli.main()
 
 
@@ -69,14 +68,35 @@ def test_existing_user_cannot_be_promoted_through_duplicate_cli_creation(
 
 
 @pytest.mark.parametrize("email", ["invalid", "missing@", "@example.com"])
-def test_invalid_cli_email_is_rejected_before_reading_password(monkeypatch, email):
+def test_invalid_cli_email_is_rejected_before_reading_password(monkeypatch, capsys, email):
     monkeypatch.setattr(sys, "argv", ["fastzip", "create-admin", email])
 
     def unexpected_prompt(_):
         pytest.fail("An invalid email must be rejected before prompting for a password")
 
     monkeypatch.setattr(cli.getpass, "getpass", unexpected_prompt)
-    with pytest.raises(ValidationError):
+    with pytest.raises(SystemExit) as rejected:
         cli.main()
+    assert rejected.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "Invalid email address."
+    assert captured.out == ""
+    with session_factory()() as db:
+        assert db.scalar(select(func.count()).select_from(User)) == 0
+
+
+@pytest.mark.parametrize("entered", [[], ["valid-test-password"]], ids=["password", "confirmation"])
+@pytest.mark.parametrize(
+    "stop, code", [(EOFError, 1), (KeyboardInterrupt, 130)], ids=["eof", "ctrl-c"]
+)
+def test_cancelling_password_input_exits_without_creating_an_admin(
+    monkeypatch, capsys, entered, stop, code
+):
+    with pytest.raises(SystemExit) as cancelled:
+        invoke_admin(monkeypatch, "admin@example.com", [*entered, stop])
+    assert cancelled.value.code == code
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "Administrator creation cancelled."
+    assert captured.out == ""
     with session_factory()() as db:
         assert db.scalar(select(func.count()).select_from(User)) == 0

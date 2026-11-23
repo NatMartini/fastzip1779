@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 
 from alembic import command
 from alembic.config import Config
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 from pydantic.networks import EmailStr
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session
@@ -59,10 +59,17 @@ def main():
                 store.client.create_bucket(**kwargs)
         print("Private storage buckets are ready")
     elif args.command == "create-admin":
-        email = str(TypeAdapter(EmailStr).validate_python(args.email)).lower()
-        password = getpass.getpass("New admin password (12–128 characters): ")
-        if not 12 <= len(password) <= 128 or password != getpass.getpass("Repeat password: "):
-            parser.error("Passwords must match and contain 12–128 characters")
+        try:
+            email = str(TypeAdapter(EmailStr).validate_python(args.email)).lower()
+        except ValidationError:
+            account.exit(2, "Invalid email address.\n")
+        try:
+            password = getpass.getpass("New admin password (12–128 characters): ")
+            if not 12 <= len(password) <= 128 or password != getpass.getpass("Repeat password: "):
+                parser.error("Passwords must match and contain 12–128 characters")
+        except (EOFError, KeyboardInterrupt) as exc:
+            code = 130 if isinstance(exc, KeyboardInterrupt) else 1
+            account.exit(code, "\nAdministrator creation cancelled.\n")
         with session_factory()() as db, db.begin():
             if db.scalar(select(User).where(User.email == email)):
                 parser.error("Account already exists; use a separate administrator email")
