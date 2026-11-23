@@ -38,9 +38,22 @@ On Windows with Docker Desktop, FastZip ran with real PostgreSQL 17, MinIO, Cadd
 | Encrypted Spaces backup | New `.dump.age` file created after correcting `BACKUP_AGE_RECIPIENT` | Earlier objects encrypted with mismatched recipient not proven recoverable |
 | Actual off-node recovery | New backup decrypted successfully; PostgreSQL 17 archive restored to an isolated local container with **4 users, 2 jobs, 8 tables**; `pg_restore` exit `0` | No app cutover, RPO/RTO measurement, or media reconciliation test performed |
 | Horizontal scaling | 12/12 successful at 1, 2 and 4 workers; **0.903 / 1.844 / 3.443 jobs/min**, respectively | One measured trial at each setting; HTTP upload and polling included |
-| Provider monitoring | `do-agent` active on both Droplets; CPU >=80%, memory >=85%, root disk >=80% rules created (5-minute windows) | Notification delivery not exercised; attached Volume watcher not verified |
+| Provider monitoring | `do-agent` active on both Droplets; CPU >=80%, memory >=85%, root disk >=80% rules created (5-minute windows) | Production team-mailbox receipt and a timer sample from the manager's attached Volume are pending. [Isolated delivery test](#volume-alert-delivery) |
 | Swarm network security | Cross-node functionality succeeded with **unencrypted** overlay | Encrypted overlay compatibility still requires separate validation |
 
 The backup is a real production-object recovery, not merely a successful backup upload. See [recovery.md](recovery.md). The 1/2/4-worker benchmark used the same 17.01 MiB-class video, 12 jobs, and balanced preset; see [experiments.md](experiments.md) for raw measurements and interpretation.
 
-The observed single-run scaling result does not establish performance at arbitrary concurrency or across different file types. No experimental evidence is claimed for intentionally killing an active worker, forcing a bad-image rollback, or checking notification delivery; these remain separate validation tasks.
+The observed single-run scaling result does not establish performance at arbitrary concurrency or across different file types. Production fault-injection drills and production notification delivery are outside these observations.
+
+## Volume alert delivery
+
+On November 22, 2026 (Toronto), an isolated Ubuntu 24.04.5 VM ran the repository's `volume-watch.service` and `volume-watch.timer` under systemd 255. The timer was enabled and active. Two separately mounted ext4 loop devices supplied the disk samples. Mailpit 1.34.0 received mail on loopback over authenticated STARTTLS with a verified lab certificate. The timestamps below are UTC on November 23.
+
+| Timer check | Usage and threshold | First reading above threshold | Message present in the lab inbox | Time to receipt |
+| --- | --- | --- | --- | ---: |
+| Normal watcher on `/mnt/fastzip_postgres` | 82.00% used, above 75% | 04:12:59.770 | 04:18:06.086 | 306.32 seconds |
+| Delivery check on a lightly used test Volume | 8.04% used, above the 0% test threshold | 04:13:00.946 | 04:18:06.086 | 305.14 seconds |
+
+For both emails, the journal ID matched the original email header and body. The normal alert carried `<179540748595.1888.2638540449595522509@lima-fzalert>`. At 04:17:58 UTC the inbox was still empty. Sampling both high readings again after delivery left the count at two. Returning the first disk to 8.04% cleared its high-usage window. The watcher rejected both `/` and an ordinary directory. In a separate recipient-rejection check, the relay accepted one address and refused another. The watcher recorded `partial`, reported one refusal and exited with status 1.
+
+**Cloud acceptance remains open.** The two outstanding receipts are a DigitalOcean resource alert in the configured team mailbox and an alert from the production manager's mounted PostgreSQL Volume in that mailbox. For the latter, also capture the manager's mount, active timer and a recent journal sample. [Production verification procedure](deployment.md#verify-alert-delivery)

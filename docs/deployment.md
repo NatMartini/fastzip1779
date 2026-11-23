@@ -125,8 +125,38 @@ DigitalOcean's root-disk utilization alert is **not** a substitute for measuring
 
 1. Install `scripts/volume_watch.py` at `/opt/fastzip/scripts/volume_watch.py`.
 2. Copy `deploy/volume-watch.service` and `.timer` to `/etc/systemd/system/`.
-3. Populate the restricted `/etc/fastzip/volume-watch.env` with `VOLUME_MOUNT=/mnt/fastzip_postgres`, notification settings, and a root-readable password file (mode 600).
+3. Set `VOLUME_MOUNT=/mnt/fastzip_postgres`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD_FILE`, `SMTP_FROM`, and the configured team recipient(s) in `ALERT_EMAILS` in `/etc/fastzip/volume-watch.env`. Set the environment file and password file to mode 600 and root ownership.
 4. Verify the alert delivery route before enabling the timer; DigitalOcean Droplets may block outbound SMTP ports 25, 465, and 587 by default. Use an approved reachable relay or provider-supported notification mechanism.
 5. Run `systemctl daemon-reload` and `systemctl enable --now volume-watch.timer`, then test mount detection, threshold behavior, and delivery separately.
 
-The Volume watcher is not counted as verified in the cloud evidence. Relevant references: [Swarm stacks](https://docs.docker.com/engine/swarm/stack-deploy/), [Swarm secrets](https://docs.docker.com/engine/swarm/secrets/), and [DigitalOcean resource alerts](https://docs.digitalocean.com/products/monitoring/how-to/manage-resource-alerts/).
+### Verify alert delivery
+
+**DigitalOcean resource alert.** In Insights → Alert Rules, check the two Droplet names and the email destination on the existing policies. For a delivery drill, create a separate rule named `FastZip delivery check <UTC timestamp>`. Select a FastZip Droplet, memory usage **above 1% for 5 minutes** (first confirm its normal usage is above 1%), and the same team email destination. Match the Droplet and rule name in the triggered alert and in the recipient's mailbox. Record the two UTC timestamps. Delete the temporary rule by its unique name or ID and confirm the original three policies are still enabled. [DigitalOcean resource alerts](https://docs.digitalocean.com/products/monitoring/how-to/manage-resource-alerts/)
+
+**PostgreSQL Volume.** On the manager, check the mounted filesystem, the persistent timer and a recent sample from its service.
+
+```sh
+findmnt --mountpoint /mnt/fastzip_postgres -o TARGET,SOURCE,FSTYPE
+findmnt -T /mnt/fastzip_postgres/postgres -o TARGET,SOURCE,FSTYPE
+systemctl is-enabled volume-watch.timer
+systemctl is-active volume-watch.timer
+systemctl list-timers --all volume-watch.timer
+sudo journalctl --utc -u volume-watch.service -n 12 --no-pager
+```
+
+Use the installed watcher from this revision for the following drill. Its normal threshold is 75% for five minutes. The temporary timer reads the same mount and SMTP configuration with a 0% test threshold, a separate state file, and a `[TEST]` subject. This exercises the five-minute window while the database runs at its usual disk utilization.
+
+```sh
+drill="fastzip-volume-check-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo systemd-run --unit="$drill" --on-active=1s --on-unit-active=60s \
+  --timer-property=AccuracySec=1s --property=Type=oneshot \
+  --property=EnvironmentFile=/etc/fastzip/volume-watch.env \
+  --property="RuntimeDirectory=$drill" --property=RuntimeDirectoryPreserve=yes \
+  /usr/bin/env "VOLUME_WATCH_STATE=/run/$drill/state.json" \
+  /usr/bin/python3 /opt/fastzip/scripts/volume_watch.py --verify-delivery
+sudo systemd-run --unit="$drill-stop" --on-active=12min \
+  /usr/bin/systemctl stop "$drill.timer"
+sudo journalctl --utc -u "$drill.service" --no-pager
+```
+
+After the five-minute window, read the journal again. Match its `message_id` with the alert ID in the body or the original `Message-ID` header in the configured recipient's mailbox. Record the mount, sampled percentage, UTC send and receipt times, and whether the IDs match. An `smtp_status` of `partial` means at least one recipient was refused. Once the check finishes, stop the temporary timer, remove its generated state file and directory under `/run/$drill`, and confirm `volume-watch.timer` is still active. [Recorded results](validation.md#volume-alert-delivery)

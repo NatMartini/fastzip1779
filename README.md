@@ -265,7 +265,8 @@ docker compose run --rm --no-deps backup python scripts/recovery_smoke.py
 | 4 | 12 | 12 | 209.112 | 3.443 | 3.81x | 0 |
 
 - **Off-node encrypted backup & restore:** After updating `BACKUP_AGE_RECIPIENT` to the operator-held public key, a live encrypted backup (`hourly/2026-11-20T22-43-10.dump.age`) from the private Spaces backup bucket was decrypted offline (`age -d`, exit `0`) and restored via `pg_restore` (exit `0`) into a network-isolated local PostgreSQL 17 container, recovering **4 users, 2 jobs, and 8 tables** without modifying production.
-- **Explicitly scoped limitations:** End-to-end alert email delivery, Volume-watcher execution, intentional PostgreSQL/worker container-kill drills, and forced bad-image rollback drills have not yet been executed in production and are tracked in [docs/validation.md](docs/validation.md).
+- **Volume alert delivery.** In an isolated Ubuntu VM, the systemd timer sent an email after a separate ext4 disk stayed above 75% for five minutes. The test inbox received it in 306 seconds, with the same message ID as the timer's journal. Production acceptance still needs the DigitalOcean alert email, the manager's Volume timer evidence and its email in the configured team mailbox. [Measured results](docs/validation.md#volume-alert-delivery) · [Production verification](docs/deployment.md#verify-alert-delivery)
+- **Production fault-injection scope.** Intentional PostgreSQL/worker container-kill drills and forced bad-image rollback drills remain pending in production. [Validation record](docs/validation.md)
 
 - **Windows release command:** After infrastructure preparation and GHCR image publication, copy `deploy/cloud.psd1.example` to `deploy/.env.cloud.psd1`, configure SSH and the published commit SHA, and run:
 
