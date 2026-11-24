@@ -31,6 +31,24 @@ class Storage:
             "s3", endpoint_url=s.s3_public_endpoint or s.s3_endpoint or None, **arguments
         )
 
+    def ensure_bucket(self) -> None:
+        try:
+            self.client.head_bucket(Bucket=self.bucket)
+            return
+        except ClientError as exc:
+            if str(exc.response["Error"]["Code"]) not in {"404", "NoSuchBucket", "NotFound"}:
+                raise
+
+        options = {"Bucket": self.bucket}
+        region = self.client.meta.region_name
+        if region != "us-east-1":
+            options["CreateBucketConfiguration"] = {"LocationConstraint": region}
+        try:
+            self.client.create_bucket(**options)
+        except self.client.exceptions.BucketAlreadyOwnedByYou:
+            # A concurrent initializer created this account's bucket after the check.
+            pass
+
     def put(self, path, key: str, content_type: str):
         self.client.upload_file(
             str(path), self.bucket, key, ExtraArgs={"ContentType": content_type}
@@ -70,6 +88,11 @@ class Storage:
             },
             ExpiresIn=expires_in,
         )
+
+
+def ensure_buckets() -> None:
+    Storage().ensure_bucket()
+    Storage(backup=True).ensure_bucket()
 
 
 @lru_cache

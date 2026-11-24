@@ -5,64 +5,15 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: production-release
-  cancel-in-progress: false
 jobs:
   checks:
     uses: ./.github/workflows/ci.yml
-  images:
+  publish:
     needs: checks
-    runs-on: ubuntu-24.04
+    uses: ./.github/workflows/publish.yml
     permissions: {contents: read, packages: write}
-    strategy:
-      matrix: {service: [api, worker, backup, frontend]}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - name: Registry path
-        run: echo "IMAGE_PATH=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-      - uses: docker/login-action@v3
-        with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
-      - uses: docker/build-push-action@v6
-        if: matrix.service != 'frontend'
-        with:
-          context: .
-          file: backend/Dockerfile
-          target: ${{ matrix.service }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ env.IMAGE_PATH }}/${{ matrix.service }}:${{ github.sha }}
-      - uses: docker/build-push-action@v6
-        if: matrix.service == 'frontend'
-        with:
-          context: .
-          file: frontend/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ env.IMAGE_PATH }}/frontend:${{ github.sha }}
-  deploy:
-    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
-    needs: images
-    runs-on: ubuntu-24.04
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure SSH
-        env:
-          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
-      - name: Deploy checked source
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          tar -czf /tmp/release.tgz deploy scripts
-          scp /tmp/release.tgz "$DEPLOY_USER@$DEPLOY_HOST:/opt/fastzip/release.tgz"
-          ssh "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /opt/fastzip/releases/$GITHUB_SHA && tar -xzf /opt/fastzip/release.tgz -C /opt/fastzip/releases/$GITHUB_SHA && cd /opt/fastzip/releases/$GITHUB_SHA && bash scripts/deploy.sh $GITHUB_SHA"
+    secrets:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}

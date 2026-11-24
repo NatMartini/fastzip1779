@@ -19,7 +19,7 @@ from fastzip.config import settings
 from fastzip.db import session_factory
 from fastzip.models import User
 from fastzip.security import hasher
-from fastzip.storage import Storage
+from fastzip.storage import Storage, ensure_buckets
 
 
 def main():
@@ -44,19 +44,7 @@ def main():
     if args.command == "migrate":
         command.upgrade(Config("alembic.ini"), "head")
     elif args.command == "init-storage":
-        for backup in (False, True):
-            store = Storage(backup=backup)
-            try:
-                store.client.head_bucket(Bucket=store.bucket)
-            except store.client.exceptions.ClientError as exc:
-                if str(exc.response["Error"]["Code"]) not in {"404", "NoSuchBucket"}:
-                    raise
-                kwargs = {"Bucket": store.bucket}
-                if settings().s3_region != "us-east-1":
-                    kwargs["CreateBucketConfiguration"] = {
-                        "LocationConstraint": settings().s3_region
-                    }
-                store.client.create_bucket(**kwargs)
+        ensure_buckets()
         print("Private storage buckets are ready")
     elif args.command == "create-admin":
         try:

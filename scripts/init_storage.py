@@ -1,17 +1,10 @@
 import time
 
-from fastzip.storage import Storage
+from fastzip.storage import ensure_buckets
 
 for attempt in range(30):
     try:
-        for backup in (False, True):
-            store = Storage(backup=backup)
-            try:
-                store.client.head_bucket(Bucket=store.bucket)
-            except store.client.exceptions.ClientError as exc:
-                if str(exc.response["Error"]["Code"]) not in {"404", "NoSuchBucket"}:
-                    raise
-                store.client.create_bucket(Bucket=store.bucket)
+        ensure_buckets()
         break
     except Exception:
         if attempt == 29:

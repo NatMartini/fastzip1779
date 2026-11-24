@@ -193,9 +193,7 @@ fault injection. The deployment results are recorded in the
 
 ## CI integration
 
-The existing [Checks workflow](../.github/workflows/ci.yml) runs `uv run pytest -q`,
-which discovers the existing security suites and the new boundary suites under
-`tests/`. No workflow changes are needed. Checks
-are triggered on pull requests and pushes to `main` or `develop`; pushing only to
-`qa_dev` does not by itself trigger that workflow. Record the actual Actions run
-for a commit before claiming CI success.
+The [Checks workflow](../.github/workflows/ci.yml) runs `uv run pytest -q` to
+discover the security and boundary suites under `tests/`. It runs directly on pull
+requests and pushes to `develop`. On a push to `main` or a manual release, open
+the `checks` job in the Release run for that commit.

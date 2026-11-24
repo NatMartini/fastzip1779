@@ -142,15 +142,34 @@ def downloadable_job(client, account, image, s3, tmp_path):
         return job
 
 
-def test_equal_sized_result_serves_original(client, downloadable_job):
+@pytest.mark.parametrize(
+    ("size_change", "use_original", "original_is_smaller"),
+    [(-1, False, False), (0, True, True), (1, True, True), (None, True, False)],
+    ids=["smaller", "equal", "larger", "unrecorded-size"],
+)
+def test_result_selection_in_history_detail_and_download(
+    client, downloadable_job, size_change, use_original, original_is_smaller
+):
     job = downloadable_job
     with session_factory()() as db, db.begin():
-        db.get(Job, job.id).output_size = job.original_size
-    response = client.get(f"/api/jobs/{job.id}/download")
+        db.get(Job, job.id).output_size = (
+            None if size_change is None else job.original_size + size_change
+        )
+    path = f"/api/jobs/{job.id}"
+    history = client.get("/api/jobs").json()["items"][0]
+    detail = client.get(path).json()
+    assert history == detail
+    assert detail["original_is_smaller"] is original_is_smaller
+    response = client.get(path + "/download")
     assert response.status_code == 200
-    assert response.json()["is_original"] is True
-    assert response.json()["filename"] == job.filename
-    assert unquote(urlparse(response.json()["url"]).path).endswith("/" + job.original_key)
+    result = response.json()
+    assert result["is_original"] is use_original
+    assert result["filename"] == (job.filename if use_original else "sample.webp")
+    key = job.original_key if use_original else job.output_key
+    assert unquote(urlparse(result["url"]).path).endswith("/" + key)
+    original = client.get(path + "/download?kind=original").json()
+    assert original["is_original"] is True
+    assert original["filename"] == job.filename
 
 
 @pytest.mark.parametrize("kind", ["original", "result"])

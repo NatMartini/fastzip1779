@@ -60,6 +60,14 @@ class Job(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     __table_args__ = (Index("jobs_claim", "status", "available_at", "created_at"),)
 
+    @property
+    def original_is_no_larger(self) -> bool:
+        return self.output_size is not None and self.original_size <= self.output_size
+
+    @property
+    def effective_status(self) -> str:
+        return "EXPIRED" if self.expires_at <= now() else self.status
+
 
 class ErrorEvent(Base):
     __tablename__ = "error_events"

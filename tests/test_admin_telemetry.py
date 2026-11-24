@@ -27,10 +27,10 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from fastzip import api
 from fastzip.config import settings
 from fastzip.db import session_factory
 from fastzip.models import BackupRun, ErrorEvent, Heartbeat, Job, User, now
+from fastzip.routes import admin
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ def admin_client(client, account):
 @pytest.fixture
 def frozen_now(admin_client, monkeypatch):
     timestamp = now()
-    monkeypatch.setattr(api, "now", lambda: timestamp)
+    monkeypatch.setattr(admin, "now", lambda: timestamp)
     return timestamp
 
 

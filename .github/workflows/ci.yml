@@ -3,7 +3,8 @@ on:
   workflow_call:
   pull_request:
   push:
-    branches: [main, develop]
+    # Release calls this workflow for main pushes and manual releases.
+    branches: [develop]
 permissions:
   contents: read
 jobs:
